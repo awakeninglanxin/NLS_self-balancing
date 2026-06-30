@@ -7,13 +7,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with: {java-version: '17', distribution: 'temurin'}
+      - name: Setup Gradle
+        run: |
+          cd apk
+          gradle wrapper --gradle-version 8.2 2>/dev/null || true
       - name: Build
         run: |
           cd apk
-          chmod +x gradlew 2>/dev/null
-          ./gradlew assembleDebug --no-daemon 2>/dev/null || gradle wrapper && ./gradlew assembleDebug --no-daemon
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: NLS-Dynamic-Balancer-APK
+          name: NLS-Self-Balancing-APK
           path: apk/app/build/outputs/apk/debug/*.apk
