@@ -1,4 +1,4 @@
-# NLS Dynamic Balancer
+# NLS Self-Balancing — 实时经络平衡仪
 
 > 耳机的降噪算法 × 扩散模型 × NLS 手环 = 实时经络平衡仪
 
