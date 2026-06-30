@@ -1,4 +1,4 @@
-package com.nls.handring
+package com.nls.selfbalancing
 
 import android.os.Bundle
 import android.view.View
@@ -133,6 +133,12 @@ class MainActivity : AppCompatActivity() {
             engine.playAllPrograms(looping)
             updateUI()
         }
+        val balanceBtn = findViewById<Button>(R.id.balance_btn)
+        balanceBtn.setOnClickListener {
+            if (engine.isPlaying) { engine.stop(); updateUI(); return@setOnClickListener }
+            engine.startDynamicBalance(looping)
+            updateUI()
+        }
         intervalSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(s: SeekBar, v: Int, b: Boolean) {
                 intervalLabel.text = String.format("%.2fs", v / 1000.0)
@@ -171,6 +177,7 @@ class MainActivity : AppCompatActivity() {
         }
         playBtn.isEnabled = conn && (selProg != null || play)
         playAllBtn.isEnabled = conn
+        findViewById<Button>(R.id.balance_btn).isEnabled = conn
         if (!play) progressBar.progress = 0
     }
 

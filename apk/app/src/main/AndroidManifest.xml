@@ -5,10 +5,9 @@
 
     <application
         android:allowBackup="true"
-        android:label="NLS手环疗愈"
+        android:label="NLS动态平衡"
         android:supportsRtl="true"
         android:theme="@style/Theme.NLS">
-
         <activity
             android:name=".MainActivity"
             android:exported="true"

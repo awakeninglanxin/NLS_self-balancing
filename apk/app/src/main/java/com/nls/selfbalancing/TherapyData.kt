@@ -1,4 +1,4 @@
-package com.nls.handring
+package com.nls.selfbalancing
 
 // Auto-generated from 1087 pcap therapy commands
 // 18 organ programs, 1087 unique frequency recipes

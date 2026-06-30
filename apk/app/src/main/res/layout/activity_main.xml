@@ -12,7 +12,7 @@
         android:orientation="vertical">
 
         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:text="NLS 手环疗愈" android:textColor="#00e5a0" android:textSize="22sp"
+            android:text="NLS 动态平衡" android:textColor="#00e5a0" android:textSize="22sp"
             android:textStyle="bold" android:layout_marginBottom="14dp"/>
 
         <!-- Status -->
@@ -123,5 +123,12 @@
                 android:textAllCaps="false" android:backgroundTint="#ff5252"
                 android:visibility="gone" android:layout_marginStart="6dp"/>
         </LinearLayout>
+
+        <Button android:id="@+id/balance_btn" android:layout_width="match_parent"
+            android:layout_height="52dp" android:layout_marginTop="8dp"
+            android:text="🧬 动态平衡 (扫描→治疗→验证)"
+            android:textColor="#000" android:textAllCaps="false"
+            android:backgroundTint="#7c4dff" android:textStyle="bold"
+            android:enabled="false"/>
     </LinearLayout>
 </ScrollView>

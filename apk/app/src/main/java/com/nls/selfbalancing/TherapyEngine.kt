@@ -1,4 +1,4 @@
-package com.nls.handring
+package com.nls.selfbalancing
 
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
@@ -173,6 +173,48 @@ class TherapyEngine(private val ctx: Context) {
         buf[9] = cmd.b9.toByte(); buf[11] = cmd.b11.toByte()
         buf[13] = cmd.b13.toByte(); buf[15] = cmd.b15.toByte()
         try { connection?.bulkTransfer(epOut, buf, buf.size, 1000) } catch (_: Exception) {}
+    }
+
+    fun startDynamicBalance(loop: Boolean) {
+        stop()
+        // 构建全部器官命令列表，每个器官使用反相双通道
+        val allCmds = mutableListOf<Cmd>()
+        val keys = TherapyData.programs.keys.sortedBy { TherapyData.programs[it]!!.b9 }
+        for (key in keys) {
+            val prog = TherapyData.programs[key]!!
+            for (cmd in prog.cmds) {
+                // 反相平衡: CH1正常发, CH2反向振幅(激发vs抑制)
+                val balanceB15 = if (cmd.b11 > 15) (15 - (cmd.b11 - 15)).coerceIn(3, 80) else (15 + (15 - cmd.b11)).coerceIn(3, 80)
+                allCmds.add(Cmd(cmd.b9, cmd.b11, cmd.b13, balanceB15))
+            }
+        }
+        
+        cmds = allCmds; index = 0; loopMode = loop; isPlaying = true; isPaused = false; paused = false
+        onStatus?.invoke("🧬 动态平衡启动 (${allCmds.size}条)")
+        
+        job = CoroutineScope(Dispatchers.IO).launch {
+            var round = 0
+            while (isPlaying && cmds.isNotEmpty()) {
+                round++
+                onStatus?.invoke("🧬 动态平衡 第$round 轮")
+                
+                for (i in cmds.indices) {
+                    if (!isPlaying) break
+                    if (paused) { while (paused && isPlaying) delay(200) }
+                    if (!isPlaying) break
+                    
+                    sendRaw(cmds[i])
+                    index = i + 1
+                    onProgress?.invoke(i + 1, cmds.size)
+                    delay(interval)
+                }
+                
+                if (!loopMode) { isPlaying = false; break }
+            }
+            
+            if (isPlaying) { stop() }
+            onStatus?.invoke("🧬 动态平衡完成")
+        }
     }
 
     fun stop() {
