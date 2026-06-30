@@ -1,0 +1,19 @@
+name: Build APK
+on: [push, pull_request]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: {java-version: '17', distribution: 'temurin'}
+      - name: Build
+        run: |
+          cd apk
+          chmod +x gradlew 2>/dev/null
+          ./gradlew assembleDebug --no-daemon 2>/dev/null || gradle wrapper && ./gradlew assembleDebug --no-daemon
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: NLS-Dynamic-Balancer-APK
+          path: apk/app/build/outputs/apk/debug/*.apk
