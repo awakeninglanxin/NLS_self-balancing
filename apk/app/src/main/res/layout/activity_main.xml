@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/program_scroll"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="#0a0a0f"
@@ -13,12 +12,15 @@
 
         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:text="NLS 动态平衡" android:textColor="#00e5a0" android:textSize="22sp"
-            android:textStyle="bold" android:layout_marginBottom="14dp"/>
+            android:textStyle="bold" android:layout_marginBottom="6dp"/>
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="扫描 → 反相治疗 → 验证" android:textColor="#666" android:textSize="12sp"
+            android:layout_marginBottom="14dp"/>
 
         <!-- Status -->
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
             android:orientation="horizontal" android:gravity="center_vertical"
-            android:padding="12dp" android:background="#14141f">
+            android:padding="14dp" android:background="#14141f" android:layout_marginBottom="10dp">
             <View android:id="@+id/status_dot" android:layout_width="14dp" android:layout_height="14dp"
                 android:background="@android:color/darker_gray" android:layout_marginEnd="10dp"/>
             <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
@@ -31,104 +33,59 @@
             </LinearLayout>
         </LinearLayout>
 
+        <!-- Connect -->
         <Button android:id="@+id/connect_btn" android:layout_width="match_parent"
-            android:layout_height="52dp" android:layout_marginTop="10dp"
+            android:layout_height="52dp"
             android:text="连接手环 (USB OTG)" android:textColor="#000"
             android:textSize="15sp" android:backgroundTint="#00e5a0" android:textAllCaps="false"/>
 
-        <Button android:id="@+id/playall_btn" android:layout_width="match_parent"
-            android:layout_height="52dp" android:layout_marginTop="8dp"
-            android:text="全部器官疗愈 (1087条原版)" android:textColor="#fff"
-            android:textSize="14sp" android:backgroundTint="#7c4dff"
-            android:textAllCaps="false" android:enabled="false"/>
-
-        <!-- Programs -->
-        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:text="器官方案 (18个)" android:textColor="#888" android:textSize="11sp"
-            android:layout_marginTop="12dp" android:layout_marginBottom="4dp"/>
-        <LinearLayout android:id="@+id/program_list" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:orientation="vertical"
-            android:background="#14141f"/>
-
-        <!-- Progress + Info -->
+        <!-- Progress -->
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
             android:orientation="horizontal" android:gravity="center_vertical"
-            android:paddingTop="8dp" android:paddingBottom="8dp" android:layout_marginTop="8dp">
+            android:paddingTop="12dp" android:paddingBottom="4dp">
             <ProgressBar android:id="@+id/progress_bar"
                 style="@style/Widget.AppCompat.ProgressBar.Horizontal"
-                android:layout_width="0dp" android:layout_height="5dp"
+                android:layout_width="0dp" android:layout_height="6dp"
                 android:layout_weight="1" android:progressTint="#00e5a0"/>
+            <TextView android:id="@+id/progress_pct" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:text="0%" android:textColor="#00e5a0"
+                android:textSize="12sp" android:minWidth="36dp" android:gravity="end"/>
         </LinearLayout>
+
         <TextView android:id="@+id/therapy_info" android:layout_width="wrap_content"
             android:layout_height="wrap_content" android:text="准备就绪"
-            android:textColor="#7c4dff" android:textSize="11sp"
-            android:layout_marginTop="2dp" android:minHeight="16dp"/>
+            android:textColor="#7c4dff" android:textSize="12sp"
+            android:layout_marginTop="4dp" android:layout_marginBottom="10dp" android:minHeight="18dp"/>
 
-        <!-- Power -->
-        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:text="功率档位" android:textColor="#888" android:textSize="11sp"
-            android:layout_marginTop="10dp" android:layout_marginBottom="4dp"/>
-        <LinearLayout android:id="@+id/power_chips" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:orientation="horizontal"
-            android:gravity="center"/>
+        <!-- Round info -->
+        <TextView android:id="@+id/round_info" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:text="" android:textColor="#aaa"
+            android:textSize="11sp" android:layout_marginBottom="8dp" android:minHeight="16dp"/>
 
-        <!-- Interval -->
+        <!-- Balance Controls -->
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:orientation="horizontal" android:gravity="center_vertical"
-            android:padding="10dp" android:background="#14141f" android:layout_marginTop="10dp">
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:text="间隔" android:textColor="#888" android:textSize="12sp" android:layout_marginEnd="8dp"/>
-            <SeekBar android:id="@+id/interval_seek" android:layout_width="0dp"
-                android:layout_height="wrap_content" android:layout_weight="1"
-                android:max="13050" android:progress="1450"/>
-            <TextView android:id="@+id/interval_label" android:layout_width="wrap_content"
-                android:layout_height="wrap_content" android:text="500ms" android:textColor="#e0e0e0"
-                android:textSize="12sp" android:minWidth="48dp"/>
-        </LinearLayout>
-
-        <!-- Repeat -->
-        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:orientation="horizontal" android:gravity="center_vertical"
-            android:padding="10dp" android:background="#14141f" android:layout_marginTop="4dp">
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:text="重复" android:textColor="#888" android:textSize="12sp" android:layout_marginEnd="8dp"/>
-            <SeekBar android:id="@+id/repeat_seek" android:layout_width="0dp"
-                android:layout_height="wrap_content" android:layout_weight="1"
-                android:max="20" android:progress="1"/>
-            <TextView android:id="@+id/repeat_label" android:layout_width="wrap_content"
-                android:layout_height="wrap_content" android:text="×1" android:textColor="#e0e0e0"
-                android:textSize="12sp" android:minWidth="36dp"/>
-        </LinearLayout>
-
-        <!-- Controls -->
-        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:orientation="horizontal" android:layout_marginTop="10dp">
-            <Button android:id="@+id/loop_btn" android:layout_width="0dp"
-                android:layout_height="52dp" android:layout_weight="1"
-                android:text="循环" android:textColor="#00e5a0" android:textAllCaps="false"
-                android:backgroundTint="#14141f"/>
-            <Button android:id="@+id/play_btn" android:layout_width="0dp"
-                android:layout_height="52dp" android:layout_weight="1.5"
-                android:text="开始" android:textColor="#000"
-                android:textAllCaps="false" android:backgroundTint="#00e5a0"
-                android:enabled="false" android:layout_marginStart="6dp"/>
-            <Button android:id="@+id/pause_btn" android:layout_width="0dp"
-                android:layout_height="52dp" android:layout_weight="1.5"
-                android:text="⏸" android:textColor="#000"
-                android:textAllCaps="false" android:backgroundTint="#ffab00"
-                android:visibility="gone" android:layout_marginStart="6dp"/>
+            android:orientation="horizontal" android:layout_marginTop="8dp">
+            <Button android:id="@+id/balance_btn" android:layout_width="0dp"
+                android:layout_height="56dp" android:layout_weight="2"
+                android:text="🧬 动态平衡" android:textColor="#000"
+                android:textAllCaps="false" android:backgroundTint="#7c4dff"
+                android:textStyle="bold" android:textSize="15sp"
+                android:enabled="false"/>
             <Button android:id="@+id/stop_btn" android:layout_width="0dp"
-                android:layout_height="52dp" android:layout_weight="1.5"
+                android:layout_height="56dp" android:layout_weight="1"
                 android:text="⏹" android:textColor="#fff"
                 android:textAllCaps="false" android:backgroundTint="#ff5252"
-                android:visibility="gone" android:layout_marginStart="6dp"/>
+                android:visibility="gone" android:textSize="18sp"
+                android:layout_marginStart="8dp"/>
         </LinearLayout>
 
-        <Button android:id="@+id/balance_btn" android:layout_width="match_parent"
-            android:layout_height="52dp" android:layout_marginTop="8dp"
-            android:text="🧬 动态平衡 (扫描→治疗→验证)"
-            android:textColor="#000" android:textAllCaps="false"
-            android:backgroundTint="#7c4dff" android:textStyle="bold"
-            android:enabled="false"/>
+        <!-- Log -->
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="运行日志" android:textColor="#555" android:textSize="10sp"
+            android:layout_marginTop="16dp" android:layout_marginBottom="4dp"/>
+        <LinearLayout android:id="@+id/log_container" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:orientation="vertical"
+            android:background="#0d0d14" android:padding="8dp"/>
+
     </LinearLayout>
 </ScrollView>
