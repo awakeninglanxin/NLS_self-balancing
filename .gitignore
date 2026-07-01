@@ -1,3 +1,6 @@
 *.py
 *.json
 nls_baseline.json
+__pycache__/
+zadig-2.9.exe
+nls_baseline.json
