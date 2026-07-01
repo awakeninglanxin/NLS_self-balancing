@@ -126,27 +126,12 @@ class BalancerEngine(private val ctx: Context) {
 
     data class Band(val b9: Int, val organ: String, val wuxing: String)
 
-    /** 五行修正系数 */
-    private fun wuxingCorr(wx: String) = when(wx) { "木"->1.0; "火"->1.5; "土"->1.0; "金"->1.2; "水"->0.8; else->1.0 }
+    // Schumann anchor constants
+    private val SCHUMANN_HARMONICS = doubleArrayOf(7.83, 14.3, 20.8, 27.3, 33.8)
 
-    // 太阳数列 (CH1): 2^n = 1,2,4,8,16,32
-    // 太阴数列 (CH2): Fibonacci = 1,1,2,3,5,8,13,21,34
-    private val sunSeq = intArrayOf(1, 2, 4, 8, 16, 32)
-    private val moonSeq = intArrayOf(1, 1, 2, 3, 5, 8, 13, 21, 34)
-
-    private fun nearest(b9: Int, seq: IntArray) = seq.map { abs(b9 - it) }.min()
-
-    private fun yinyangWeight(b9: Int): Pair<Double, Double> {
-        val dSun = nearest(b9, sunSeq)
-        val dMoon = nearest(b9, moonSeq)
-        val wSun = 1.0 / (1 + dSun)
-        val wMoon = 1.0 / (1 + dMoon)
-        val total = wSun + wMoon
-        return wSun / total to wMoon / total
-    }
-
-    private fun nearestSun(b9: Int) = sunSeq.minByOrNull { abs(b9 - it) } ?: b9
-    private fun nearestMoon(b9: Int) = moonSeq.minByOrNull { abs(b9 - it) } ?: b9
+    var algoMode: String = "ab"  // legacy/yinyang/fusion/schumann/ab
+    private var algoQueue = mutableListOf<String>()
+    private var batchNum = 0
 
     fun startBalance() {
         stop()
@@ -158,52 +143,101 @@ class BalancerEngine(private val ctx: Context) {
             var round = 1
             while (isPlaying) {
                 onRound?.invoke(round)
-                onLog?.invoke("第$round 轮 — 扫描中…")
+                // Determine algorithm
+                val useAlgo = if (algoMode == "ab") {
+                    if (algoQueue.isEmpty()) {
+                        batchNum++
+                        algoQueue = mutableListOf("legacy", "yinyang", "fusion", "schumann")
+                        algoQueue.shuffle()
+                        val labels = algoQueue.joinToString(" → ") {
+                            mapOf("legacy" to "同频", "yinyang" to "☀☽", "fusion" to "融合", "schumann" to "舒曼").getOrDefault(it, it)
+                        }
+                        onLog?.invoke("─── 第${batchNum}遍: $labels ───")
+                    }
+                    algoQueue.removeAt(0)
+                } else algoMode
+
+                val label = mapOf("legacy" to "同频反相", "yinyang" to "☀☽双频", "fusion" to "⚡融合", "schumann" to "🌍舒曼锚").getOrDefault(useAlgo, useAlgo)
+                onLog?.invoke("第${round}轮 — 扫描中… [$label]")
+
                 val deltas = mutableMapOf<Int, Double>()
                 for (band in bands) {
                     if (!isPlaying) break
-                    sendProbe(band.b9, 15)
-                    delay(100)
+                    sendProbe(band.b9, 15, 15)
+                    delay(80)
                     deltas[band.b9] = (Math.random() * 20 - 10)
                     onProgress?.invoke(deltas.size, bands.size)
                 }
                 val abnormal = bands.filter { abs(deltas[it.b9] ?: 0.0) > 4 }
                 if (abnormal.isNotEmpty()) {
-                    onLog?.invoke("  ⚡ ${abnormal.size}项异常 [☀☽双频]")
+                    onLog?.invoke("  ⚡ ${abnormal.size}项异常 [$label]")
                     for (band in abnormal) {
                         if (!isPlaying) break
                         val delta = deltas[band.b9]!!
                         val corr = wuxingCorr(band.wuxing)
                         val adjust = (abs(delta) * 0.5 * corr).toInt().coerceAtMost(60)
-                        val (wSun, wMoon) = yinyangWeight(band.b9)
-                        val sunB9 = nearestSun(band.b9)
-                        val moonB9 = nearestMoon(band.b9)
-                        val sunAmp = if (delta > 0) (15 - (adjust * wSun).toInt()).coerceIn(3, 80) else (15 + (adjust * wSun).toInt()).coerceIn(3, 80)
-                        val moonAmp = if (delta > 0) (15 + (adjust * wMoon).toInt()).coerceIn(3, 80) else (15 - (adjust * wMoon).toInt()).coerceIn(3, 80)
-                        sendProbe(sunB9, sunAmp, moonAmp)
+                        when (useAlgo) {
+                            "yinyang" -> treatYinyang(band.b9, delta, adjust)
+                            "fusion" -> treatFusion(band.b9, delta, adjust)
+                            "schumann" -> treatSchumann(band.b9, delta, adjust)
+                            else -> treatLegacy(band.b9, delta, adjust) // legacy
+                        }
                         val freq = 7.3728 * Math.pow(2.0, band.b9 / 4.0) * 3
-                        onLog?.invoke("  ${band.organ} ☀b9=$sunB9 ☽b9=$moonB9 Δ=${"%.1f".format(delta)}")
-                        delay(120)
+                        onLog?.invoke("  ${band.organ} Δ=${"%.1f".format(delta)}")
+                        delay(100)
                     }
                 } else { onLog?.invoke("  ✓ 全部频段平衡") }
-
                 round++
                 onProgress?.invoke(bands.size, bands.size)
-                delay(3000)  // 轮间间隔
+                delay(3000)
             }
         }
     }
 
-    private fun sendProbe(b9: Int, b11: Int, b15: Int = b11) {
+    // ── ① Legacy: CH1=CH2 同频反相 ──
+    private fun treatLegacy(b9: Int, delta: Double, adjust: Int) {
+        val b11 = if (delta > 0) (15 - adjust).coerceIn(3, 80) else (15 + adjust).coerceIn(3, 80)
+        val b15 = if (delta > 0) (15 + adjust).coerceIn(3, 80) else (15 - adjust).coerceIn(3, 80)
+        sendProbe(b9, b11, b15)
+    }
+
+    // ── ② Yinyang: CH1=2^n CH2=Fibonacci ──
+    private fun treatYinyang(b9: Int, delta: Double, adjust: Int) {
+        val (wSun, wMoon) = yinyangWeight(b9)
+        val sunB9 = nearestSun(b9)
+        val moonB9 = nearestMoon(b9)
+        val sunAmp = if (delta > 0) (15 - (adjust * wSun).toInt()).coerceIn(3, 80) else (15 + (adjust * wSun).toInt()).coerceIn(3, 80)
+        val moonAmp = if (delta > 0) (15 + (adjust * wMoon).toInt()).coerceIn(3, 80) else (15 - (adjust * wMoon).toInt()).coerceIn(3, 80)
         buf.fill(0)
-        buf[9] = b9.toByte(); buf[11] = b11.toByte()
-        buf[13] = b9.toByte(); buf[15] = b15.toByte()
+        buf[9] = sunB9.toByte(); buf[11] = sunAmp.toByte()
+        buf[13] = moonB9.toByte(); buf[15] = moonAmp.toByte()
         try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
     }
 
-    fun stop() {
-        isPlaying = false
-        job?.cancel(); job = null
+    // ── ③ Fusion: 反相地基 + 数列微调(≤±2) ──
+    private fun treatFusion(b9: Int, delta: Double, adjust: Int) {
+        val b11 = if (delta > 0) (15 - adjust).coerceIn(3, 80) else (15 + adjust).coerceIn(3, 80)
+        val b15 = if (delta > 0) (15 + adjust).coerceIn(3, 80) else (15 - adjust).coerceIn(3, 80)
+        val rawSun = nearestSun(b9)
+        val rawMoon = nearestMoon(b9)
+        val ch1b9 = b9.coerceIn(rawSun - 2, rawSun + 2)
+        val ch2b9 = b9.coerceIn(rawMoon - 2, rawMoon + 2)
+        buf.fill(0)
+        buf[9] = ch1b9.toByte(); buf[11] = b11.toByte()
+        buf[13] = ch2b9.toByte(); buf[15] = b15.toByte()
+        try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
+    }
+
+    // ── ④ Schumann: 低频弱信号锚定 ──
+    private fun treatSchumann(b9: Int, delta: Double, adjust: Int) {
+        val sIdx = (abs(delta) / 5).toInt().coerceAtMost(4)
+        val schB9 = (b9 - 8).coerceIn(1, 10)
+        val ch2B9 = (schB9 + sIdx + 1).coerceIn(1, 10)
+        buf.fill(0)
+        buf[9] = schB9.toByte(); buf[11] = 15.toByte()
+        buf[13] = ch2B9.toByte(); buf[15] = 15.toByte()
+        try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
+    }
         try {
             val zero = ByteArray(128)
             connection?.bulkTransfer(epOut, zero, zero.size, 500)
