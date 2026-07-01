@@ -11,8 +11,8 @@ android {
         applicationId = "com.nls.selfbalancing"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "2.0-dynamic"
+        versionCode = 4
+        versionName = "4.0-yinyang"
     }
 
     buildTypes {
