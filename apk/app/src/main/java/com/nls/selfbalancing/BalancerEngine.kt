@@ -230,7 +230,21 @@ class BalancerEngine(private val ctx: Context) {
         try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
     }
 
-    // ── Helper: 太阳/太阴权重 (b9=14~31 映射到 2^n / Fibonacci) ──
+    // ── Core: send probe command ──
+    private fun sendProbe(b9: Int, b11: Int, b15: Int) {
+        buf.fill(0)
+        buf[9] = b9.toByte(); buf[11] = b11.toByte()
+        buf[13] = b9.toByte(); buf[15] = b15.toByte()
+        try { connection?.bulkTransfer(epOut, buf, buf.size, 1000) } catch (_: Exception) {}
+    }
+
+    // ── 五行权重修正 ──
+    private fun wuxingCorr(wx: String): Double = when(wx) {
+        "木" -> 1.0; "火" -> 1.5; "土" -> 1.0; "金" -> 1.2; "水" -> 0.8
+        else -> 1.0
+    }
+
+    // ── Helper: 太阳/太阴权重 (b9=14~31 → 2^n / Fibonacci) ──
     private val SUN_SEQ = intArrayOf(1, 2, 4, 8, 16, 32)
     private val MOON_SEQ = intArrayOf(1, 1, 2, 3, 5, 8, 13, 21, 34)
 
