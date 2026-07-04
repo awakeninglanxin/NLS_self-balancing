@@ -173,7 +173,7 @@ class BalancerEngine(private val ctx: Context) {
                             "schumann" -> treatSchumann(band.b9, delta, adjust)
                             else -> treatLegacy(band.b9, delta, adjust) // legacy
                         }
-                        val freq = 7.3728 / Math.pow(2.0, (band.b9 - 14) / 2.0)
+                        val freq = 7.3728 / Math.pow(2.0, (band.b9 - 14).toDouble() / 2.0)
                         onLog?.invoke("  ${band.organ} Δ=${"%.1f".format(delta)}")
                         delay(100)
                     }
@@ -197,8 +197,8 @@ class BalancerEngine(private val ctx: Context) {
         val (wSun, wMoon) = yinyangWeight(b9)
         val sunB9 = nearestSun(b9)
         val moonB9 = nearestMoon(b9)
-        val sunAmp = if (delta > 0) (15 - (adjust * wSun).toInt()).coerceIn(3, 80) else (15 + (adjust * wSun).toInt()).coerceIn(3, 80)
-        val moonAmp = if (delta > 0) (15 + (adjust * wMoon).toInt()).coerceIn(3, 80) else (15 - (adjust * wMoon).toInt()).coerceIn(3, 80)
+        val sunAmp = if (delta > 0) (15.0 - adjust * wSun).toInt().coerceIn(3, 80) else (15.0 + adjust * wSun).toInt().coerceIn(3, 80)
+        val moonAmp = if (delta > 0) (15.0 + adjust * wMoon).toInt().coerceIn(3, 80) else (15.0 - adjust * wMoon).toInt().coerceIn(3, 80)
         buf.fill(0)
         buf[9] = sunB9.toByte(); buf[11] = sunAmp.toByte()
         buf[13] = moonB9.toByte(); buf[15] = moonAmp.toByte()
@@ -222,13 +222,31 @@ class BalancerEngine(private val ctx: Context) {
     // ── ④ Schumann: 低频弱信号锚定 ──
     private fun treatSchumann(b9: Int, delta: Double, adjust: Int) {
         val sIdx = (abs(delta) / 5).toInt().coerceAtMost(4)
-        val schB9 = (b9 - 8).coerceIn(1, 10)
-        val ch2B9 = (schB9 + sIdx + 1).coerceIn(1, 10)
+        val schB9 = (b9 - 6).coerceIn(14, 31)
+        val ch2B9 = (schB9 + sIdx + 1).coerceIn(14, 31)
         buf.fill(0)
         buf[9] = schB9.toByte(); buf[11] = 15.toByte()
         buf[13] = ch2B9.toByte(); buf[15] = 15.toByte()
         try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
     }
+
+    // ── Helper: 太阳/太阴权重 (b9=14~31 映射到 2^n / Fibonacci) ──
+    private val SUN_SEQ = intArrayOf(1, 2, 4, 8, 16, 32)
+    private val MOON_SEQ = intArrayOf(1, 1, 2, 3, 5, 8, 13, 21, 34)
+
+    private fun yinyangWeight(b9: Int): Pair<Double, Double> {
+        val dSun = SUN_SEQ.minOf { abs(b9 - it) }.toDouble()
+        val dMoon = MOON_SEQ.minOf { abs(b9 - it) }.toDouble()
+        val total = dSun + dMoon
+        return if (total > 0) Pair(dMoon / total, dSun / total) else Pair(0.5, 0.5)
+    }
+
+    private fun nearestSun(b9: Int): Int = SUN_SEQ.minByOrNull { abs(b9 - it) } ?: b9
+    private fun nearestMoon(b9: Int): Int = MOON_SEQ.minByOrNull { abs(b9 - it) } ?: b9
+
+    fun stop() {
+        isPlaying = false
+        job?.cancel(); job = null
         try {
             val zero = ByteArray(128)
             connection?.bulkTransfer(epOut, zero, zero.size, 500)
