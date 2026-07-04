@@ -25,9 +25,13 @@ jobs:
       - name: Build
         run: |
           cd apk
+          VERSION=$(grep versionName app/build.gradle.kts | grep -oP 'v\K[0-9.]+' | head -1)
+          [ -z "$VERSION" ] && VERSION="7.0"
           ./gradlew assembleDebug --no-daemon
+          mkdir -p build
+          find app/build -name "*.apk" -exec cp {} build/nls_balance_v${VERSION}.apk \; -quit
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: NLS-Self-Balancing-APK
-          path: apk/app/build/outputs/apk/debug/*.apk
+          path: apk/build/nls_balance_v*.apk
