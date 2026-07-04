@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="12dp"
+    android:background="#0a0a14">
+
+    <!-- Header -->
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:gravity="center" android:paddingBottom="8dp">
+        <TextView android:id="@+id/header2" android:text="NLS 动态平衡仪 v7"
+            android:textColor="#00ff88" android:textSize="20sp" android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- Status Bar -->
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:gravity="center_vertical" android:padding="6dp" android:background="#111122"
+        android:orientation="horizontal">
+        <View android:id="@+id/statusDot" android:layout_width="10dp" android:layout_height="10dp"
+            android:background="#ff4444" android:layout_marginEnd="8dp" />
+        <TextView android:id="@+id/statusText" android:text="未连接"
+            android:textColor="#aaa" android:textSize="13sp" android:layout_weight="1" />
+        <Button android:id="@+id/connectBtn" android:text="连接手环"
+            android:textSize="12sp" android:padding="4dp 12dp" />
+    </LinearLayout>
+
+    <!-- Round & Algorithm -->
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:gravity="center" android:padding="8dp 0" android:orientation="horizontal">
+        <TextView android:id="@+id/roundText" android:text="第0轮"
+            android:textColor="#4488ff" android:textSize="16sp" android:textStyle="bold" />
+        <TextView android:id="@+id/algoText" android:text=""
+            android:textColor="#ffaa00" android:textSize="13sp" android:layout_marginStart="16dp" />
+    </LinearLayout>
+
+    <!-- Progress -->
+    <ProgressBar android:id="@+id/progress" style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent" android:layout_height="6dp"
+        android:max="18" android:progress="0" android:layout_margin="4dp 0" />
+
+    <!-- Scan Results (scrollable) -->
+    <TextView android:text="⚠ 频段偏差" android:textColor="#888" android:textSize="11sp" android:padding="4dp 0" />
+    <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="3"
+        android:background="#0d0d1a">
+        <LinearLayout android:id="@+id/bandsContainer" android:orientation="vertical"
+            android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="6dp" />
+    </ScrollView>
+
+    <!-- Log (scrollable) -->
+    <TextView android:text="📋 运行日志" android:textColor="#888" android:textSize="11sp" android:padding="4dp 0" />
+    <ScrollView android:id="@+id/logScroll" android:layout_width="match_parent" android:layout_height="0dp"
+        android:layout_weight="2" android:background="#0d0d1a">
+        <LinearLayout android:id="@+id/logContainer" android:orientation="vertical"
+            android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="4dp" />
+    </ScrollView>
+
+    <!-- Buttons -->
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:gravity="center" android:paddingTop="8dp">
+        <Button android:id="@+id/balanceBtn" android:text="▶ 启动平衡"
+            android:textColor="#fff" android:backgroundTint="#00aa55" android:textSize="14sp"
+            android:layout_width="0dp" android:layout_weight="1" android:layout_marginEnd="6dp" />
+        <Button android:id="@+id/stopBtn" android:text="⏹ 停止"
+            android:textColor="#fff" android:backgroundTint="#aa3333" android:textSize="14sp"
+            android:layout_width="0dp" android:layout_weight="1" android:layout_marginStart="6dp" />
+    </LinearLayout>
+</LinearLayout>
