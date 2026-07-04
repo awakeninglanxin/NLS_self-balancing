@@ -102,26 +102,17 @@ class BalancerEngine(private val ctx: Context) {
 
     // ========== 动态平衡核心 ==========
 
-    /** 35频段 b9=1~35 (26MHz~9.5GHz) + 器官名 + 五行 */
+    /** 18频段 b9=14~31 (20kHz~7.37MHz) 分频器模型 */
     private val bands = listOf(
-        Band(1, "极低频/基础", "土"), Band(2, "极低频/共振", "土"),
-        Band(3, "极低频/调和", "土"), Band(4, "超低频/A", "水"),
-        Band(5, "超低频/B", "水"), Band(6, "超低频/C", "水"),
-        Band(7, "低频/A", "金"), Band(8, "低频/B", "金"),
-        Band(9, "低频/C", "金"), Band(10, "中低频/A", "木"),
-        Band(11, "中低频/B", "木"), Band(12, "中低频/C", "木"),
-        Band(13, "过渡频/A", "火"),
-        Band(14, "骨骼/基础", "土"), Band(15, "肌肉/结缔", "土"),
-        Band(16, "皮肤/皮毛", "金"), Band(17, "淋巴/免疫", "火"),
-        Band(18, "消化/肠道", "金"), Band(19, "消化/胃部", "土"),
-        Band(20, "肝脏/代谢", "木"), Band(21, "胰腺/内分泌", "土"),
-        Band(22, "脾脏/血液", "土"), Band(23, "肺部/呼吸", "金"),
-        Band(24, "甲状腺", "火"),   Band(25, "肾脏/肾上腺", "水"),
-        Band(26, "心血管", "火"),   Band(27, "心脏", "火"),
-        Band(28, "神经系统", "火"), Band(29, "脑/中枢", "火"),
-        Band(30, "下丘脑", "火"),   Band(31, "松果体", "火"),
-        Band(32, "超高频/A", "木"), Band(33, "超高频/B", "木"),
-        Band(34, "超高频/C", "木"), Band(35, "极高频", "火"),
+        Band(14, "松果体/脑中枢", "火"), Band(15, "下丘脑/内分泌", "火"),
+        Band(16, "大脑皮层", "火"), Band(17, "小脑/脑干", "火"),
+        Band(18, "心脏/心血管", "火"), Band(19, "心脏瓣膜", "火"),
+        Band(20, "心脏后壁血管", "火"), Band(21, "冠状动脉", "火"),
+        Band(22, "肺/支气管", "金"), Band(23, "肺实质/肺泡", "金"),
+        Band(24, "甲状腺/甲状旁腺", "火"), Band(25, "肝脏/肝血管", "木"),
+        Band(26, "胃/食道", "土"), Band(27, "十二指肠/小肠", "火"),
+        Band(28, "胰腺/脾脏", "土"), Band(29, "肾脏/肾上腺", "水"),
+        Band(30, "大肠/直肠", "金"), Band(31, "骨骼/关节/牙齿", "水"),
     )
 
     data class Band(val b9: Int, val organ: String, val wuxing: String)
@@ -137,7 +128,7 @@ class BalancerEngine(private val ctx: Context) {
         stop()
         isPlaying = true
         onStatus?.invoke("🧬 动态平衡启动")
-        onLog?.invoke("── 开始扫描 35 频段 ──")
+        onLog?.invoke("── 开始扫描 18 频段 ──")
 
         job = CoroutineScope(Dispatchers.IO).launch {
             var round = 1
@@ -182,7 +173,7 @@ class BalancerEngine(private val ctx: Context) {
                             "schumann" -> treatSchumann(band.b9, delta, adjust)
                             else -> treatLegacy(band.b9, delta, adjust) // legacy
                         }
-                        val freq = 7.3728 * Math.pow(2.0, band.b9 / 4.0) * 3
+                        val freq = 7.3728 / Math.pow(2.0, (band.b9 - 14) / 2.0)
                         onLog?.invoke("  ${band.organ} Δ=${"%.1f".format(delta)}")
                         delay(100)
                     }
