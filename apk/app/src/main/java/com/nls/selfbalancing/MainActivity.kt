@@ -24,6 +24,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        engine.initialize()  // 必须在 super.onCreate 之后注册 receiver
         setContentView(R.layout.activity_main)
         initViews()
         setupEngine()

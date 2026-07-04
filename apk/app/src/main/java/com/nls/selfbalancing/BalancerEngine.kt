@@ -40,8 +40,13 @@ class BalancerEngine(private val ctx: Context) {
         }
     }
 
-    init {
-        ctx.registerReceiver(usbReceiver, IntentFilter(actionUsbPermission), Context.RECEIVER_NOT_EXPORTED)
+    private var registered = false
+
+    fun initialize() {
+        if (!registered) {
+            ctx.registerReceiver(usbReceiver, IntentFilter(actionUsbPermission), Context.RECEIVER_NOT_EXPORTED)
+            registered = true
+        }
     }
 
     fun connect(callback: (Boolean, String) -> Unit) {
