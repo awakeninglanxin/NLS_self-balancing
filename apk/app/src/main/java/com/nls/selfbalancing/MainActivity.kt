@@ -3,7 +3,7 @@ package com.nls.selfbalancing
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.view.Gravity
+import android.view.View
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -31,12 +31,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun initViews() {
-        statusDot = findViewById(R.id.statusDot)
-        statusText = findViewById(R.id.statusText)
-        connectBtn = findViewById(R.id.connectBtn)
-        balanceBtn = findViewById(R.id.balanceBtn)
-        stopBtn = findViewById(R.id.stopBtn)
-        roundText = findViewById(R.id.roundText)
+        statusDot = findViewById<View>(R.id.statusDot)
+        statusText = findViewById<TextView>(R.id.statusText)
+        connectBtn = findViewById<Button>(R.id.connectBtn)
+        balanceBtn = findViewById<Button>(R.id.balanceBtn)
+        stopBtn = findViewById<Button>(R.id.stopBtn)
+        roundText = findViewById<TextView>(R.id.roundText)
         algoText = findViewById(R.id.algoText)
         progress = findViewById(R.id.progress)
         bandsContainer = findViewById(R.id.bandsContainer)
