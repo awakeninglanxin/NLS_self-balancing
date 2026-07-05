@@ -287,7 +287,8 @@ class Balancer:
                 cmd[9] = b9; cmd[11] = b11; cmd[13] = ch2_b9; cmd[15] = b15
                 self._safe_write(cmd)
             balanced.append({"b9": b9, "organ": organ, "delta": delta,
-                "direction": "↓" if delta > 0 else "↑", "ch2": f"b9={ch2_b9}"})
+                "direction": "↓" if delta > 0 else "↑",
+                "ch1b9": b9, "ch1amp": b11, "ch2b9": ch2_b9, "ch2amp": b15})
             time.sleep(0.08)
         return balanced
 
@@ -350,7 +351,7 @@ class Balancer:
                 "b9": b9, "organ": organ, "delta": delta,
                 "direction": "↓" if delta > 0 else "↑",
                 "mode": mode_tag,
-                "ch1": f"b9={ch1_b9} a={b11}", "ch2": f"b9={ch2_b9} a={b15}",
+                "ch1b9": ch1_b9, "ch1amp": b11, "ch2b9": ch2_b9, "ch2amp": b15,
                 "amp_boost": round(amp_factor, 2),
             })
             time.sleep(0.08)
@@ -385,7 +386,7 @@ class Balancer:
             balanced.append({
                 "b9": b9, "organ": organ, "delta": delta,
                 "direction": "↓" if delta > 0 else "↑",
-                "ch1": f"☀b9={sun_b9} a={sun_amp}", "ch2": f"☽b9={moon_b9} a={moon_amp}",
+                "ch1b9": sun_b9, "ch1amp": sun_amp, "ch2b9": moon_b9, "ch2amp": moon_amp,
             })
             time.sleep(0.08)
         return balanced
@@ -417,16 +418,19 @@ class Balancer:
             b11 = max(3, int(15 - adjust * w_sun)) if delta > 0 else min(172, int(15 + adjust * w_sun))
             b15 = min(172, int(15 + adjust * w_moon)) if delta > 0 else max(3, int(15 - adjust * w_moon))
 
+            # CH2偏移: 微异频, 创造差拍增强调制
+            c2 = max(14, min(31, b9 + (1 if delta > 0 else -1)))
+
             if self.ser and self.ser.is_open:
                 cmd = bytearray(128)
                 cmd[9] = b9; cmd[11] = b11
-                cmd[13] = b9; cmd[15] = b15
+                cmd[13] = c2; cmd[15] = b15
                 self._safe_write(cmd)
 
             balanced.append({
                 "b9": b9, "organ": organ, "delta": delta,
                 "direction": "↓" if delta > 0 else "↑",
-                "ch1": f"☀w={w_sun:.0%} a={b11}", "ch2": f"☽w={w_moon:.0%} a={b15}",
+                "ch1b9": b9, "ch1amp": b11, "ch2b9": c2, "ch2amp": b15,
             })
             time.sleep(0.08)
         return balanced
@@ -445,7 +449,8 @@ class Balancer:
                 cmd[9] = sch_b9; cmd[11] = weak_amp
                 cmd[13] = ch2_b9; cmd[15] = weak_amp
                 self._safe_write(cmd)
-            balanced.append({"b9": b9, "organ": organ, "delta": delta, "direction": "⚓"})
+            balanced.append({"b9": b9, "organ": organ, "delta": delta, "direction": "⚓",
+                "ch1b9": sch_b9, "ch1amp": 15, "ch2b9": ch2_b9, "ch2amp": 15})
             time.sleep(0.08)
         return balanced
 
@@ -530,7 +535,8 @@ class Balancer:
                 cmd = bytearray(128)
                 cmd[9]=b9; cmd[11]=b11; cmd[13]=ch2_b9; cmd[15]=b15
                 self._safe_write(cmd)
-            balanced.append({"b9":b9,"organ":organ,"delta":delta,"direction":"💧"})
+            balanced.append({"b9":b9,"organ":organ,"delta":delta,"direction":"💧",
+                "ch1b9":b9, "ch1amp":b11, "ch2b9":ch2_b9, "ch2amp":b15})
             time.sleep(0.08)
         return balanced
 
@@ -566,7 +572,8 @@ class Balancer:
                 cmd = bytearray(128)
                 cmd[9]=b9; cmd[11]=b11; cmd[13]=ch2_b9; cmd[15]=b15
                 self._safe_write(cmd)
-            balanced.append({"b9":b9,"organ":organ,"delta":delta,"direction":"⚛"})
+            balanced.append({"b9":b9,"organ":organ,"delta":delta,"direction":"⚛",
+                "ch1b9":b9, "ch1amp":b11, "ch2b9":ch2_b9, "ch2amp":b15})
             time.sleep(0.08)
         return balanced
 
@@ -597,7 +604,8 @@ class Balancer:
                     cmd[9]=ch1b9; cmd[11]=ch1amp; cmd[13]=ch2b9; cmd[15]=ch2amp
                     self._safe_write(cmd)
                 if i < 4: time.sleep(0.04)
-            balanced.append({"b9":b9,"organ":organ,"delta":delta,"direction":"🎵"})
+            balanced.append({"b9":b9,"organ":organ,"delta":delta,"direction":"🎵",
+                "ch1b9": ch1b9, "ch1amp": ch1amp, "ch2b9": ch2b9, "ch2amp": ch2amp, "count": 5})
         return balanced
 
     def verify(self, before):
@@ -723,7 +731,23 @@ class Balancer:
                         balanced = self.balance_legacy(deltas)
 
                     self.add_log(f"  🔊 已治 {len(balanced)}项")
-                    # 日志简化
+                    # 详细CH1/CH2日志
+                    for item in balanced:
+                        ch1b9 = item.get("ch1b9", item.get("b9", "?"))
+                        ch1amp = item.get("ch1amp", "?")
+                        ch2b9 = item.get("ch2b9", item.get("b9", "?"))
+                        ch2amp = item.get("ch2amp", "?")
+                        f1 = 7.3728 * (2 ** (ch1b9 / 4)) * 3
+                        f2 = 7.3728 * (2 ** (ch2b9 / 4)) * 3
+                        diff_f = abs(f1 - f2)
+                        ratio = f"{ch1amp/ch2amp:.2f}" if isinstance(ch2amp, (int,float)) and ch2amp > 0 else "∞"
+                        ch1f = f"{f1:.2f}" if f1 < 1000 else f"{f1/1000:.3f}M"
+                        ch2f = f"{f2:.2f}" if f2 < 1000 else f"{f2/1000:.3f}M"
+                        diffs = f"{diff_f:.2f}" if diff_f < 1000 else f"{diff_f/1000:.3f}M"
+                        dir_str = item.get("direction", "")
+                        cnt = item.get("count", 1)
+                        extra = f" ×{cnt}对" if cnt > 1 else ""
+                        self.add_log(f"    {item.get('organ','?')} Δ={item.get('delta',0):+.1f} {dir_str}{extra} | CH1[b9={ch1b9} a={ch1amp} {ch1f}] CH2[b9={ch2b9} a={ch2amp} {ch2f}] Δf={diffs} a:R={ratio}")
 
                     # 第3步：验证
                     vrf, imp, wors = self.verify(deltas)
