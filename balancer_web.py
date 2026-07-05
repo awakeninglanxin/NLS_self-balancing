@@ -995,17 +995,17 @@ canvas{display:block;margin:0 auto;border-radius:8px}
 
 <div class="tabs">
   <button class="tab active" onclick="switchTab('radar')">五行</button>
-  <button class="tab" onclick="switchTab('list')">列表</button>
   <button class="tab" onclick="switchTab('ridge')">脊线</button>
+  <button class="tab" onclick="switchTab('compare')">对比</button>
 </div>
 
 <div class="card view active" id="view_radar">
   <b style="color:#888;font-size:11px">☯ 五行平衡雷达图</b>
   <canvas id="cvRadar" width="584" height="260"></canvas>
 </div>
-<div class="card view" id="view_list">
-  <b>📊 频段偏差</b>
-  <div id="deltas" style="max-height:380px;overflow-y:auto"></div>
+<div class="card view" id="view_compare">
+  <b style="color:#888;font-size:11px">⚖ 八维算法对比 (改善率)</b>
+  <canvas id="cvCompare" width="584" height="280"></canvas>
 </div>
 <div class="card view" id="view_ridge">
   <b style="color:#888;font-size:11px">📈 频谱脊线图 (Pictograph)</b>
@@ -1046,24 +1046,24 @@ function drawRadar(items){
 
   var cx=w/2,cy=h/2+5,radius=Math.min(cx,cy)-50,n=5;
   var mx=Math.max(10,Math.max.apply(null,vals.map(Math.abs)));
-  // Rings
+  // Rings (white visible grid, matching phone v7.25)
   for(var ring=1;ring<=3;ring++){
-    ctx.beginPath();ctx.strokeStyle='#1a1a2e';ctx.lineWidth=1;
+    ctx.beginPath();ctx.strokeStyle='rgba(255,255,255,0.2)';ctx.lineWidth=1.5;
     for(var i=0;i<n;i++){
       var a=-Math.PI/2+2*Math.PI*i/n,rr=radius*ring/3;
       i==0?ctx.moveTo(cx+rr*Math.cos(a),cy+rr*Math.sin(a)):ctx.lineTo(cx+rr*Math.cos(a),cy+rr*Math.sin(a));
     }
     ctx.closePath();ctx.stroke();
   }
-  // Axes + labels
+  // Axes + labels (colored wuxing, 2x size)
   for(var i=0;i<n;i++){
     var a=-Math.PI/2+2*Math.PI*i/n;
-    ctx.beginPath();ctx.strokeStyle='#1a1a2e';ctx.moveTo(cx,cy);ctx.lineTo(cx+radius*Math.cos(a),cy+radius*Math.sin(a));ctx.stroke();
-    ctx.fillStyle=colors[i];ctx.font='bold 13px system-ui';ctx.textAlign='center';
-    ctx.fillText(names[i],cx+(radius+22)*Math.cos(a),cy+(radius+22)*Math.sin(a)+5);
+    ctx.beginPath();ctx.strokeStyle='rgba(255,255,255,0.2)';ctx.moveTo(cx,cy);ctx.lineTo(cx+radius*Math.cos(a),cy+radius*Math.sin(a));ctx.stroke();
+    ctx.fillStyle=colors[i];ctx.font='bold 26px system-ui';ctx.textAlign='center';
+    ctx.fillText(names[i],cx+(radius+28)*Math.cos(a),cy+(radius+28)*Math.sin(a)+9);
   }
-  // Data polygon
-  ctx.beginPath();ctx.strokeStyle='#7c4dff';ctx.lineWidth=2;
+  // Data polygon (green, matching phone)
+  ctx.beginPath();ctx.strokeStyle='#00ff88';ctx.lineWidth=2;
   var hasData=false;
   for(var i=0;i<n;i++){
     var a=-Math.PI/2+2*Math.PI*i/n,v=vals[i];
@@ -1071,7 +1071,7 @@ function drawRadar(items){
     if(Math.abs(v)>0.01)hasData=true;
     i==0?ctx.moveTo(cx+rr*Math.cos(a),cy+rr*Math.sin(a)):ctx.lineTo(cx+rr*Math.cos(a),cy+rr*Math.sin(a));
   }
-  ctx.closePath();ctx.fillStyle='rgba(124,77,255,0.25)';ctx.fill();ctx.stroke();
+  ctx.closePath();ctx.fillStyle='rgba(0,255,136,0.25)';ctx.fill();ctx.stroke();
   // Dots
   for(var i=0;i<n;i++){
     var a=-Math.PI/2+2*Math.PI*i/n,v=vals[i];
@@ -1095,6 +1095,37 @@ function drawRadar(items){
   if(!hasData){ctx.fillStyle='#555';ctx.font='13px system-ui';ctx.textAlign='center';ctx.fillText('所有五行均值接近零',w/2,cy+radius+30)}
 }
 
+function drawCompare(items){
+  var c=document.getElementById('cvCompare'),w=c.width,h=c.height,ctx=c.getContext('2d');
+  ctx.clearRect(0,0,w,h);
+  ctx.fillStyle='#0a0a14';ctx.fillRect(0,0,w,h);
+  // Get algo stats from the global AB stats
+  var ab=document.getElementById('abStats');
+  if(!items||items.length<3){
+    ctx.fillStyle='#555';ctx.font='13px system-ui';ctx.textAlign='center';
+    ctx.fillText('等待统计…(需完成至少一轮八维扫描)',w/2,h/2);
+    return;
+  }
+  var algoColors=['#ffcc44','#ff6644','#ffaa00','#44ff44','#4488ff','#44ccff','#ff6688','#ff88cc'];
+  var algoNames={original:'🔗原版',legacy:'同频反相',yinyang:'☀☽双频',fusion:'⚡融合',schumann:'🌍舒曼锚',water:'💧水共振',jellium:'⚛幻数',multiharm:'🎵多谐波'};
+  var barH=(h-40)/Math.max(items.length,1);
+  for(var i=0;i<items.length;i++){
+    var d=items[i],total=Math.max(1,d.imp+d.wors),rate=d.imp/total;
+    var y=30+i*barH,fullW=w-170;
+    // Name
+    ctx.fillStyle='#aaa';ctx.font='12px system-ui';ctx.textAlign='left';
+    ctx.fillText(algoNames[d.key]||d.key,10,y+barH/2+4);
+    // BG
+    ctx.fillStyle='#222';ctx.fillRect(130,y+2,fullW,barH-4);
+    // Bar
+    ctx.fillStyle=algoColors[i%algoColors.length];
+    ctx.fillRect(130,y+2,Math.max(2,fullW*rate),barH-4);
+    // Stats
+    ctx.fillStyle='#00ff88';ctx.font='11px system-ui';
+    ctx.fillText(Math.round(rate*100)+'%  ↑'+d.imp+' ↓'+d.wors,136,y+barH/2+4);
+  }
+}
+
 var curTab='radar';
 function switchTab(name){
   curTab=name;
@@ -1107,6 +1138,23 @@ function switchTab(name){
     var items=Object.values(s.deltas||{});
     drawRidge(items);
   });
+  if(name==='compare'){
+    // Use the AB stats from poll
+    var ab=document.getElementById('abStats');
+    var org=window._abStats_original||{},leg=window._abStats_legacy||{},yy=window._abStats_yinyang||{},
+        fus=window._abStats_fusion||{},sch=window._abStats_schumann||{},h2o=window._abStats_water||{},
+        jel=window._abStats_jellium||{},mh=window._abStats_multiharm||{};
+    drawCompare([
+      {key:'original',imp:org.imp||0,wors:org.wors||0},
+      {key:'legacy',imp:leg.imp||0,wors:leg.wors||0},
+      {key:'yinyang',imp:yy.imp||0,wors:yy.wors||0},
+      {key:'fusion',imp:fus.imp||0,wors:fus.wors||0},
+      {key:'schumann',imp:sch.imp||0,wors:sch.wors||0},
+      {key:'water',imp:h2o.imp||0,wors:h2o.wors||0},
+      {key:'jellium',imp:jel.imp||0,wors:jel.wors||0},
+      {key:'multiharm',imp:mh.imp||0,wors:mh.wors||0}
+    ]);
+  }
 }
 
 function drawRidge(items){
@@ -1123,7 +1171,7 @@ function drawRidge(items){
   var barW=(w-40)/sorted.length;
   ctx.fillStyle='#0a0a14';ctx.fillRect(0,0,w,h);
   // Draw baseline
-  ctx.strokeStyle='#333';ctx.lineWidth=1;
+  ctx.strokeStyle='rgba(255,255,255,0.3)';ctx.lineWidth=1.5;
   var midY=h/2;
   ctx.beginPath();ctx.moveTo(20,midY);ctx.lineTo(w-10,midY);ctx.stroke();
   // Draw frequency band dividers (高频→低频)
@@ -1297,6 +1345,10 @@ function poll(){
 
     // 八维对比统计 + 颜色条
     var ab=document.getElementById('abStats'),org=s.ab_original||{},leg=s.ab_legacy||{},yy=s.ab_yinyang||{},fus=s.ab_fusion||{},sch=s.ab_schumann||{},h2o=s.ab_water||{},jel=s.ab_jellium||{},mh=s.ab_multiharm||{};
+    // Store for compare tab
+    window._abStats_original=org;window._abStats_legacy=leg;window._abStats_yinyang=yy;
+    window._abStats_fusion=fus;window._abStats_schumann=sch;window._abStats_water=h2o;
+    window._abStats_jellium=jel;window._abStats_multiharm=mh;
     var orgRate=org.rounds>0?(org.imp/(org.imp+org.wors||1)*100).toFixed(0):'-';
     var legRate=leg.rounds>0?(leg.imp/(leg.imp+leg.wors||1)*100).toFixed(0):'-';
     var yyRate=yy.rounds>0?(yy.imp/(yy.imp+yy.wors||1)*100).toFixed(0):'-';
