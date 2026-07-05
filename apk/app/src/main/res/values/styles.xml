@@ -1,7 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="AppTheme" parent="Theme.AppCompat.Light.NoActionBar">
-        <item name="android:colorBackground">#0a0a14</item>
-        <item name="android:textColor">#cccccc</item>
-        <item name="colorAccent">#00ff88</item>
+    <style name="Theme.NLS" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#00e5a0</item>
+        <item name="colorPrimaryVariant">#00a878</item>
+        <item name="colorOnPrimary">#000000</item>
+        <item name="colorSecondary">#7c4dff</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
 </resources>

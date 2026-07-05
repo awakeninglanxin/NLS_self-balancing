@@ -15,19 +15,19 @@ class MainActivity : AppCompatActivity() {
     private lateinit var engine: BalancerEngine
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    private var statusDot: View? = null
-    private var statusText: TextView? = null
-    private var connectBtn: Button? = null
-    private var balanceBtn: Button? = null
-    private var stopBtn: Button? = null
-    private var roundText: TextView? = null
-    private var algoText: TextView? = null
-    private var progress: ProgressBar? = null
-    private var bandsContainer: LinearLayout? = null
-    private var logContainer: LinearLayout? = null
+    private lateinit var statusDot: View
+    private lateinit var statusText: TextView
+    private lateinit var connectBtn: Button
+    private lateinit var balanceBtn: Button
+    private lateinit var stopBtn: Button
+    private lateinit var roundText: TextView
+    private lateinit var algoText: TextView
+    private lateinit var progress: ProgressBar
+    private lateinit var bandsContainer: LinearLayout
+    private lateinit var logContainer: LinearLayout
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // ★ 全局崩溃捕获 — 闪退前必须显示错误信息
+        // ★ 全局崩溃捕获
         val oldHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, ex ->
             val sw = StringWriter()
@@ -41,7 +41,6 @@ class MainActivity : AppCompatActivity() {
                     .setCancelable(false)
                     .show()
             } catch (_: Exception) {
-                // AlertDialog also failed — show toast then die
                 try { Toast.makeText(this@MainActivity, msg.take(200), Toast.LENGTH_LONG).show(); Thread.sleep(3000) } catch (_: Exception) {}
                 oldHandler?.uncaughtException(thread, ex)
             }
@@ -50,10 +49,16 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        engine = BalancerEngine(applicationContext)
+        engine = BalancerEngine(this)
         engine.initialize()
+
         bindViews()
         setupCallbacks()
+
+        connectBtn.setOnClickListener { onConnect() }
+        balanceBtn.setOnClickListener { onBalance() }
+        stopBtn.setOnClickListener { engine.stop(); updateUI() }
+
         updateUI()
     }
 
@@ -68,59 +73,41 @@ class MainActivity : AppCompatActivity() {
         progress = findViewById(R.id.progress)
         bandsContainer = findViewById(R.id.bandsContainer)
         logContainer = findViewById(R.id.logContainer)
-
-        connectBtn?.setOnClickListener { onConnect() }
-        balanceBtn?.setOnClickListener { onBalance() }
-        stopBtn?.setOnClickListener { onStopClick() }
     }
 
     private fun setupCallbacks() {
-        engine.onRound = { r -> runOnUi { roundText?.text = "第${r}轮" } }
-        engine.onStatus = { s -> runOnUi { algoText?.text = s } }
-        engine.onProgress = { cur, max -> runOnUi { progress?.also { it.progress = cur; it.max = max } } }
-        engine.onLog = { msg -> runOnUi { addLog(msg) } }
+        engine.onRound = { r -> mainHandler.post { roundText.text = "第${r}轮" } }
+        engine.onStatus = { s -> mainHandler.post { algoText.text = s } }
+        engine.onProgress = { cur, max ->
+            mainHandler.post { progress.progress = cur; progress.max = max }
+        }
+        engine.onLog = { msg -> mainHandler.post { addLog(msg) } }
     }
 
     private fun onConnect() {
-        if (engine.isConnected) {
-            engine.disconnect()
-            updateUI()
-            return
-        }
-        runOnUi { connectBtn?.isEnabled = false; connectBtn?.text = "连接中…" }
+        if (engine.isConnected) { engine.disconnect(); updateUI(); return }
+        connectBtn.isEnabled = false; connectBtn.text = "连接中…"
         engine.connect { ok, msg ->
-            runOnUi {
-                addLog(msg)
-                updateUI()
-            }
+            mainHandler.post { addLog(msg); updateUI() }
         }
     }
 
     private fun onBalance() {
         if (engine.isPlaying) { engine.stop(); updateUI(); return }
-        engine.startBalance()
-        updateUI()
-    }
-
-    private fun onStopClick() {
-        engine.stop()
-        updateUI()
+        engine.startBalance(); updateUI()
     }
 
     private fun updateUI() {
         val conn = engine.isConnected
-        statusDot?.setBackgroundResource(if (conn) android.R.color.holo_green_light else android.R.color.darker_gray)
-        statusText?.text = if (conn) "手环已连接" else "未连接"
-        connectBtn?.also {
-            it.isEnabled = true
-            it.text = if (conn) "断开" else "连接手环"
-        }
-        balanceBtn?.text = if (engine.isPlaying) "⏸ 停止" else "▶ 启动平衡"
+        statusDot.setBackgroundResource(if (conn) android.R.color.holo_green_light else android.R.color.darker_gray)
+        statusText.text = if (conn) "手环已连接" else "未连接"
+        connectBtn.isEnabled = true
+        connectBtn.text = if (conn) "断开" else "连接手环"
+        balanceBtn.text = if (engine.isPlaying) "⏸ 停止" else "▶ 启动平衡"
     }
 
     private fun addLog(msg: String) {
-        val ctx = this
-        val tv = TextView(ctx).apply {
+        val tv = TextView(this).apply {
             text = msg; textSize = 12f
             val color = when {
                 msg.contains("⚡") -> android.R.color.holo_orange_light
@@ -128,20 +115,12 @@ class MainActivity : AppCompatActivity() {
                 msg.contains("──") -> android.R.color.holo_blue_light
                 else -> android.R.color.darker_gray
             }
-            setTextColor(ContextCompat.getColor(ctx, color))
+            setTextColor(ContextCompat.getColor(this@MainActivity, color))
             setPadding(4, 2, 4, 2)
         }
-        logContainer?.addView(tv, 0)
-        val count = logContainer?.childCount ?: 0
-        if (count > 50) logContainer?.removeViewAt(count - 1)
+        logContainer.addView(tv, 0)
+        if (logContainer.childCount > 50) logContainer.removeViewAt(logContainer.childCount - 1)
     }
 
-    private fun runOnUi(action: () -> Unit) {
-        mainHandler.post(action)
-    }
-
-    override fun onDestroy() {
-        engine.destroy()
-        super.onDestroy()
-    }
+    override fun onDestroy() { engine.destroy(); super.onDestroy() }
 }

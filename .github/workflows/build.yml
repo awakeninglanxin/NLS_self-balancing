@@ -14,11 +14,11 @@ jobs:
           mkdir -p $HOME/.gradle
           echo "distributionBase=GRADLE_USER_HOME" > apk/gradle/wrapper/gradle-wrapper.properties
           echo "distributionPath=wrapper/dists" >> apk/gradle/wrapper/gradle-wrapper.properties
-          echo "distributionUrl=https\://services.gradle.org/distributions/gradle-8.7-bin.zip" >> apk/gradle/wrapper/gradle-wrapper.properties
+          echo "distributionUrl=https\://services.gradle.org/distributions/gradle-8.4-bin.zip" >> apk/gradle/wrapper/gradle-wrapper.properties
           echo "zipStoreBase=GRADLE_USER_HOME" >> apk/gradle/wrapper/gradle-wrapper.properties
           echo "zipStorePath=wrapper/dists" >> apk/gradle/wrapper/gradle-wrapper.properties
           # Download gradle wrapper jar
-          curl -sL "https://raw.githubusercontent.com/gradle/gradle/v8.7.0/gradle/wrapper/gradle-wrapper.jar" -o apk/gradle/wrapper/gradle-wrapper.jar
+          curl -sL "https://raw.githubusercontent.com/gradle/gradle/v8.4.0/gradle/wrapper/gradle-wrapper.jar" -o apk/gradle/wrapper/gradle-wrapper.jar
           # Create gradlew script
           printf '#!/bin/sh\nDIRNAME=$(dirname "$0")\nAPP_HOME=$(cd "$DIRNAME" && pwd -P)\nCLASSPATH=$APP_HOME/gradle/wrapper/gradle-wrapper.jar\nexec java -classpath "$CLASSPATH" org.gradle.wrapper.GradleWrapperMain "$@"\n' > apk/gradlew
           chmod +x apk/gradlew
