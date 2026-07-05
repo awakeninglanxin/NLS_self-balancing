@@ -3,8 +3,8 @@ package com.nls.selfbalancing
 import android.app.AlertDialog
 import android.graphics.Color
 import android.os.Bundle
-import android.os.Looper
 import android.os.Handler
+import android.os.Looper
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -19,7 +19,6 @@ class MainActivity : AppCompatActivity() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var chartView: ChartView? = null
     private var tabRadar: TextView? = null
-    private var tabBands: TextView? = null
     private var tabRidge: TextView? = null
 
     private lateinit var statusDot: View
@@ -31,7 +30,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var roundText: TextView
     private lateinit var algoText: TextView
     private lateinit var progress: ProgressBar
-    private lateinit var bandsContainer: LinearLayout
     private lateinit var logContainer: LinearLayout
     private lateinit var tabHost: LinearLayout
 
@@ -78,7 +76,6 @@ class MainActivity : AppCompatActivity() {
         roundText = findViewById(R.id.roundText)
         algoText = findViewById(R.id.algoText)
         progress = findViewById(R.id.progress)
-        bandsContainer = findViewById(R.id.bandsContainer)
         logContainer = findViewById(R.id.logContainer)
         tabHost = findViewById(R.id.tabHost)
     }
@@ -86,49 +83,47 @@ class MainActivity : AppCompatActivity() {
     private fun buildTabHost() {
         val ctx = this
 
-        // Tab row
+        // Tab row — only 2 tabs
         val tabRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER
             setPadding(0, 2, 0, 2)
         }
         fun makeTab(label: String, onClick: () -> Unit): TextView {
             return TextView(ctx).apply {
-                text = label; textSize = 11f
+                text = label; textSize = 12f
                 setTextColor(Color.parseColor("#888888"))
-                setPadding(20, 8, 20, 8)
+                setPadding(24, 8, 24, 8)
                 setBackgroundColor(Color.parseColor("#111122"))
                 isClickable = true; isFocusable = true
                 setOnClickListener { onClick() }
             }
         }
-        tabRadar = makeTab("☯ 五行") { switchTab(ChartView.Mode.RADAR) }
-        tabBands = makeTab("📊 偏差") { switchTab(ChartView.Mode.BANDS) }
-        tabRidge = makeTab("📈 脊线") { switchTab(ChartView.Mode.RIDGE) }
+        tabRadar = makeTab("☯ 五行雷达") { switchTab(ChartView.Mode.RADAR) }
+        tabRidge = makeTab("📈 频谱脊线") { switchTab(ChartView.Mode.RIDGE) }
         tabRow.addView(tabRadar)
-        tabRow.addView(tabBands)
         tabRow.addView(tabRidge)
 
         // Chart area
         val chartFrame = FrameLayout(ctx).apply {
             setBackgroundColor(Color.parseColor("#0d0d1a"))
-            layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(180))
+            layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT)
         }
         chartView = ChartView(ctx).apply {
-            layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT)
         }
         chartFrame.addView(chartView)
 
         tabHost.addView(tabRow)
         tabHost.addView(chartFrame)
-        switchTab(ChartView.Mode.BANDS)
+        switchTab(ChartView.Mode.RIDGE)
     }
 
     private fun switchTab(mode: ChartView.Mode) {
         chartView?.setTab(mode)
-        val active = 0xFF00e5a0.toInt()
-        val inactive = 0xFF888888.toInt()
+        val active = 0xFF00e5a0.toInt(); val inactive = 0xFF888888.toInt()
         tabRadar?.setTextColor(if (mode == ChartView.Mode.RADAR) active else inactive)
-        tabBands?.setTextColor(if (mode == ChartView.Mode.BANDS) active else inactive)
         tabRidge?.setTextColor(if (mode == ChartView.Mode.RIDGE) active else inactive)
     }
 
@@ -152,22 +147,21 @@ class MainActivity : AppCompatActivity() {
 
     private fun onConnect() {
         if (engine.isConnected) { engine.disconnect(); updateUI(); return }
-        connectBtn.isEnabled = false; connectBtn.text = "连接中…"
+        connectBtn.isEnabled = false; connectBtn.text = "…"
         engine.connect { ok, msg -> mainHandler.post { addLog(msg); updateUI() } }
     }
 
     private fun onCalibrate() {
         if (!engine.isConnected) { addLog("⚠ 请先连接手环"); return }
-        calBtn.isEnabled = false
+        calBtn.isEnabled = false; calBtn.text = "校准中…"
         addLog("📐 校准中…传感器请悬空")
         engine.calibrate { ok, msg ->
-            mainHandler.post { addLog(msg); calBtn.isEnabled = true }
+            mainHandler.post { addLog(msg); calBtn.isEnabled = true; calBtn.text = "📐 校准"; updateUI() }
         }
     }
 
     private fun onBalance() {
         if (engine.isPlaying) { engine.stop(); updateUI(); return }
-        tabHost.visibility = View.VISIBLE
         engine.startBalance(); updateUI()
     }
 
@@ -176,27 +170,26 @@ class MainActivity : AppCompatActivity() {
         statusDot.setBackgroundResource(if (conn) android.R.color.holo_green_light else android.R.color.darker_gray)
         statusText.text = if (conn) "手环已连接" else "未连接"
         connectBtn.isEnabled = true
-        connectBtn.text = if (conn) "断开" else "连接手环"
+        connectBtn.text = if (conn) "断开" else "连接"
         balanceBtn.text = if (engine.isPlaying) "⏸ 停止" else "▶ 启动平衡"
     }
 
     private fun addLog(msg: String) {
         val tv = TextView(this).apply {
-            text = msg; textSize = 12f
+            text = msg; textSize = 11f
             val color = when {
-                msg.contains("⚡") -> android.R.color.holo_orange_light
-                msg.contains("✓") -> android.R.color.holo_green_light
+                msg.contains("⚡") || msg.contains("📐") -> android.R.color.holo_orange_light
+                msg.contains("✓") || msg.contains("✅") -> android.R.color.holo_green_light
                 msg.contains("──") -> android.R.color.holo_blue_light
+                msg.contains("⚠") -> android.R.color.holo_red_light
                 else -> android.R.color.darker_gray
             }
             setTextColor(ContextCompat.getColor(this@MainActivity, color))
-            setPadding(4, 2, 4, 2)
+            setPadding(2, 1, 2, 1)
         }
         logContainer.addView(tv, 0)
         if (logContainer.childCount > 50) logContainer.removeViewAt(logContainer.childCount - 1)
     }
-
-    private fun dp(v: Int): Int = (v * resources.displayMetrics.density + 0.5f).toInt()
 
     override fun onDestroy() { engine.destroy(); super.onDestroy() }
 }
