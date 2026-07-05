@@ -102,6 +102,8 @@ class Balancer:
         self._algo_queue = []
         self._batch_num = 0
         self._pending_start = False  # 校准完成前点了开始→排队标记
+        self.scan_amp = 20  # 扫描振幅 (3-80), 默认20比原15更敏感
+        self.per_b9_amp = {}  # {b9: amp} 每个频段的独立最优振幅 (auto_tune填充)
         # 每次启动清空旧基线，强制重新悬空校准
         if os.path.exists(BASELINE_FILE):
             os.remove(BASELINE_FILE)
@@ -110,6 +112,8 @@ class Balancer:
             "deltas": {}, "verify": {}, "log": [],
             "improved": 0, "worsened": 0, "connected": False,
             "has_baseline": False,
+            "scan_amp": self.scan_amp,
+            "per_b9_amp": self.per_b9_amp,
             "algo": "ab",
             "ab_original": {"imp": 0, "wors": 0, "rounds": 0},
             "ab_legacy": {"imp": 0, "wors": 0, "rounds": 0},
@@ -158,7 +162,9 @@ class Balancer:
             cmd = bytearray(128)
             cmd[9] = b9; cmd[11] = b11; cmd[13] = b9; cmd[15] = b11
             self.ser.reset_input_buffer()
-            self._safe_write(cmd)
+            if not self._safe_write(cmd):
+                self.add_log("⚠ 写入失败，设备可能断开")
+                return [100] * 256
             time.sleep(0.08)
             return list(self.ser.read(256))
         except (serial.SerialException, OSError) as e:
@@ -188,7 +194,8 @@ class Balancer:
         deltas = {}
         raw_vals = {}  # 用于耦合度计算
         for b9 in B9_RANGE:
-            resp = self.probe(b9)
+            amp = self.per_b9_amp.get(b9, self.scan_amp)  # per-b9优先
+            resp = self.probe(b9, amp)
             if len(resp) == 256:
                 avg = sum(resp) / 256
                 bl = self.baseline.get(b9, 105)
@@ -516,7 +523,7 @@ class Balancer:
             water_hz = self.WATER_MODES[self.WATER_IDX[w_idx]]
             # 团簇级跃: 小b9(低频)=大团簇(高振幅), 大b9(高频)=小团簇(低振幅)
             cluster_tier = min(6, max(0, (31 - b9) // 3))  # b9越小→tier越大
-            amp_boost = self.WATER_CLUSTER_AMP[cluster_tier]
+            amp_boost = CLUSTER_AMP[cluster_tier]
             # 三档频段 + 团簇级跃振幅
             if water_hz < 50:
                 weight = 1.0; ch2_b9 = max(14, min(31, b9 + 2))
@@ -608,6 +615,38 @@ class Balancer:
                 "ch1b9": ch1b9, "ch1amp": ch1amp, "ch2b9": ch2b9, "ch2amp": ch2amp, "count": 5})
         return balanced
 
+    # ── 第九算法: 五音疗愈 (宫商角徵羽→五行→b9异频双通道) ──
+    WUYIN_MAP = [
+        ("宫(土)", 22, 20, "土"),  # 脾 461k/922k 纯八度
+        ("商(金)", 23, 22, "金"),  # 肺 326k/461k 近纯四度
+        ("角(木)", 16, 15, "木"),  # 肝 3.69M/5.21M 近纯四度
+        ("羽(水)", 30, 28, "水"),  # 肾 29k/58k 纯八度
+        ("徵(火)", 27, 25, "火"),  # 心 81k/163k 纯八度
+    ]
+    _wuyin_idx = 0
+
+    def balance_wuyin(self, deltas):
+        """五音疗愈: 五行相生轮转, 异频双通道差拍干涉"""
+        balanced = []
+        sorted_items = sorted(deltas.items(), key=lambda x: -abs(x[1]))
+        for b9, delta in sorted_items[:8]:
+            if abs(delta) < 3: continue
+            organ, _, wuxing = B9_MAP.get(b9, ('?', '?', '土'))
+            label, ch1b9, ch2b9, wx = self.WUYIN_MAP[self._wuyin_idx % len(self.WUYIN_MAP)]
+            self._wuyin_idx += 1
+            adjust = min(60, int(abs(delta) * 0.5 * self._wuxing_corr(wuxing)))
+            b11 = max(3, min(172, 15 + adjust)) if delta > 0 else max(3, min(172, 15 - adjust))
+            b15 = max(3, min(172, 15 - adjust)) if delta > 0 else max(3, min(172, 15 + adjust))
+            if self.ser and self.ser.is_open:
+                cmd = bytearray(128)
+                cmd[9]=ch1b9; cmd[11]=b11; cmd[13]=ch2b9; cmd[15]=b15
+                self._safe_write(cmd)
+            balanced.append({"b9":b9,"organ":organ,"delta":delta,"direction":"🎵",
+                "ch1b9": ch1b9, "ch1amp": b11, "ch2b9": ch2b9, "ch2amp": b15})
+            self.add_log(f"  🎵{label} {organ} CH1={ch1b9} CH2={ch2b9}")
+            time.sleep(0.08)
+        return balanced
+
     def verify(self, before):
         """复扫验证：对比治疗前后偏差"""
         imp, wors = 0, 0
@@ -635,10 +674,11 @@ class Balancer:
     def calibrate(self):
         self.calibrating = True
         try:
-            self.add_log("📐 校准基线中…传感器请悬空")
+            self.add_log(f"📐 校准基线中…传感器请悬空 (振幅={self.scan_amp})")
             raw = {}
             for b9 in B9_RANGE:
-                resp = self.probe(b9)
+                amp = self.per_b9_amp.get(b9, self.scan_amp)  # per-b9优先
+                resp = self.probe(b9, amp)
                 raw[b9] = round(sum(resp) / len(resp), 1) if len(resp) == 256 else 105.0
             self.baseline = raw
             with open(BASELINE_FILE, 'w') as f:
@@ -660,6 +700,138 @@ class Balancer:
             self.add_log(f"❌ 校准失败: {str(e)[:60]}")
         finally:
             self.calibrating = False
+
+    def auto_tune_amp(self):
+        """智能调谐: 在当前振幅下扫一遍, 根据每个频段偏离聚类中心的程度
+        自动分配各自振幅——偏离大的保持, 偏离小的适度增压以增强信号分化"""
+        self.calibrating = True
+        try:
+            time.sleep(1.0)  # 校准后冷却(铁律65: 轮间≥1.5s, 这里是新会话)
+            self.add_log(f"🔧 智能调谐(振幅={self.scan_amp})…传感器请佩戴好")
+            # ── 第1遍: 在当前振幅下扫描18频段 ──
+            amp = self.scan_amp
+            raw_vals = {}
+            for b9 in B9_RANGE:
+                if not self.ser or not self.ser.is_open:
+                    self.add_log("⚠ 设备断开，调谐中止")
+                    self.calibrating = False
+                    return {"ok": False, "msg": "设备断开"}
+                resp = self.probe(b9, amp)
+                if len(resp) == 256:
+                    v = sum(resp) / 256
+                    if v > 20:  # 仅排除纯零值(探针失败), 允许弱信号
+                        raw_vals[b9] = v
+                time.sleep(0.08)
+            valid_n = len(raw_vals)
+            if valid_n < 16:
+                self.add_log(f"⚠ 信号过弱: 仅{valid_n}/18频段有效 (需≥16), 调谐中止")
+                self.calibrating = False
+                return {"ok": False, "msg": f"有效信号不足({valid_n}/18), 检查传感器接触"}
+            # ── 第2遍: 聚类分析, 按偏离度分配per-b9振幅 ──
+            vals = list(raw_vals.values())
+            svals = sorted(vals)
+            median_v = svals[len(vals)//2]
+            mad = sorted(abs(v - median_v) for v in vals)[len(vals)//2]
+            effective_mad = max(mad, 0.8)  # 最小MAD保护
+            spread = max(vals) - min(vals)
+            self.add_log(f"  📊 基线质量: {valid_n}/18有效 范围{spread:.1f} 中位{median_v:.0f} MAD={mad:.1f}")
+            # 按偏离度分三档: 近(埋没在噪声中) / 中 / 远(信号清晰)
+            self.per_b9_amp = {}
+            near_count = mid_count = far_count = 0
+            for b9, v in raw_vals.items():
+                dev = abs(v - median_v)
+                if dev > 2.5 * effective_mad:
+                    # 信号清晰→保持当前振幅即可
+                    self.per_b9_amp[b9] = amp
+                    far_count += 1
+                elif dev > 1.5 * effective_mad:
+                    # 中等信号→微增压 +10
+                    self.per_b9_amp[b9] = min(amp + 10, 80)
+                    mid_count += 1
+                else:
+                    # 信号弱→显著增压 +20
+                    self.per_b9_amp[b9] = min(amp + 20, 80)
+                    near_count += 1
+            # 未扫到的b9用全局振幅兜底
+            for b9 in B9_RANGE:
+                if b9 not in self.per_b9_amp:
+                    self.per_b9_amp[b9] = amp
+            # ── 第3遍: 汇总 ──
+            unique_amps = sorted(set(self.per_b9_amp.values()))
+            amp_dist = {a: sum(1 for v in self.per_b9_amp.values() if v == a) for a in unique_amps}
+            dist_str = ", ".join(f"{a}(×{amp_dist[a]})" for a in unique_amps)
+            self.add_log(f"  🎯 偏离分配: 清晰×{far_count} 中等×{mid_count} 弱×{near_count}")
+            self.add_log(f"✅ 调谐完成: 振幅分布 {dist_str}")
+            # 振幅未变且无增压→基线可沿用
+            if far_count == valid_n:
+                self.add_log("   当前振幅已最优, 基线可沿用")
+            else:
+                self.status["has_baseline"] = False
+                self.baseline = {}
+                self.add_log(f"   振幅分布已更新, 需重新校准基线")
+            self.status["scan_amp"] = amp
+            self.calibrating = False
+            return {"ok": True, "optimal_amp": amp, "tuned_b9": near_count + mid_count,
+                    "per_b9_amp": {str(k): v for k, v in self.per_b9_amp.items()},
+                    "quality": "good" if valid_n >= 17 else "ok"}
+        except Exception as e:
+            self.add_log(f"❌ 调谐失败: {str(e)[:60]}")
+            self.calibrating = False
+            return {"ok": False, "msg": str(e)[:80]}
+
+    def diag_channels(self):
+        """诊断CH1/CH2角色: 独立改变两通道参数看响应差异
+        用probe()封装保证写入安全, 每轮检查连接状态"""
+        if not self.ser or not self.ser.is_open:
+            return {"ok": False, "msg": "设备未连接"}
+        b9_test = 20
+        tests = [
+            ("A:低TX+低RX", b9_test, 15, b9_test, 15),
+            ("B:高TX+低RX", b9_test, 60, b9_test, 15),
+            ("C:低TX+高RX", b9_test, 15, b9_test, 60),
+            ("D:高TX+高RX", b9_test, 60, b9_test, 60),
+            ("E:异频TX≠RX", b9_test, 40, b9_test+5, 40),
+        ]
+        results = []
+        self.add_log("🔬 信道诊断实验 (b9=20固定)…")
+        for label, ch1b9, ch1amp, ch2b9, ch2amp in tests:
+            if not self.ser or not self.ser.is_open:
+                self.add_log(f"  {label}: ⚠ 设备已断开, 中止后续测试")
+                break
+            time.sleep(0.3)
+            try:
+                # 使用probe但覆写CH2参数
+                cmd = bytearray(128)
+                cmd[9]=ch1b9; cmd[11]=ch1amp; cmd[13]=ch2b9; cmd[15]=ch2amp
+                self.ser.reset_input_buffer()
+                if not self._safe_write(cmd):
+                    self.add_log(f"  {label}: ⚠ 写入失败")
+                    continue
+                time.sleep(0.08)
+                resp = list(self.ser.read(256))
+                if len(resp) == 256:
+                    avg = round(sum(resp)/256, 1)
+                    rms = round((sum((b-128)**2 for b in resp)/256)**0.5, 1)
+                    high = sum(1 for b in resp if b > 150)
+                    results.append({"label": label, "avg": avg, "rms": rms, "high": high})
+                    self.add_log(f"  {label}: avg={avg:.1f} RMS={rms:.1f} 高位={high}")
+                else:
+                    self.add_log(f"  {label}: ⚠ 响应长度{len(resp)}≠256")
+            except Exception as e:
+                self.add_log(f"  {label}: ❌ {e}")
+        if len(results) >= 2:
+            ba = results[1]["avg"] - results[0]["avg"] if len(results)>1 else 0
+            ca = results[2]["avg"] - results[0]["avg"] if len(results)>2 else 0
+            self.add_log(f"  分析: Δavg(B-A)={ba:+.1f} Δavg(C-A)={ca:+.1f}")
+            if abs(ba) > abs(ca) * 1.5:
+                self.add_log("  → CH1主导 (发射端), 增大b11=更强信号")
+            elif abs(ca) > abs(ba) * 1.5:
+                self.add_log("  → CH2主导 (接收端), 增大b15=更高灵敏度")
+            else:
+                self.add_log("  → 双信道贡献相当")
+        elif results:
+            self.add_log(f"  ⚠ 仅{len(results)}项完成, 结果不足以分析")
+        return {"ok": True, "results": results}
 
     def loop(self):
         """主循环：扫描→治疗→验证，带错误保护"""
@@ -697,9 +869,9 @@ class Balancer:
                     if algo == "ab":
                         if not self._algo_queue:
                             self._batch_num += 1
-                            self._algo_queue = ["original", "legacy", "yinyang", "fusion", "schumann", "water", "jellium", "multiharm"]
+                            self._algo_queue = ["original", "legacy", "yinyang", "fusion", "schumann", "water", "jellium", "multiharm", "wuyin"]
                             random.shuffle(self._algo_queue)
-                            batch_labels = [({"original": "🔗原版", "legacy": "同频反相", "yinyang": "☀☽双频", "fusion": "⚡融合", "schumann": "🌍舒曼锚", "water": "💧水共振", "jellium": "⚛幻数", "multiharm": "🎵多谐波"}[a]) for a in self._algo_queue]
+                            batch_labels = [({"original": "🔗原版", "legacy": "同频反相", "yinyang": "☀☽双频", "fusion": "⚡融合", "schumann": "🌍舒曼锚", "water": "💧水共振", "jellium": "⚛幻数", "multiharm": "🎵多谐波", "wuyin": "🎵五音"}[a]) for a in self._algo_queue]
                             self.add_log(f"─── 第{self._batch_num}遍: {' → '.join(batch_labels)} ───")
                         use_algo = self._algo_queue.pop(0)
                         self.status["current_algo"] = use_algo
@@ -709,7 +881,7 @@ class Balancer:
 
                     abn_list = sorted(abn.items(), key=lambda x: -abs(x[1]))
                     organ_names = [B9_MAP.get(b9, ('?', '?', ''))[0] for b9, _ in abn_list[:5]]
-                    algo_labels = {"original": "🔗原版", "legacy": "同频反相", "yinyang": "☀☽双频", "fusion": "⚡融合", "schumann": "🌍舒曼锚", "water": "💧水共振", "jellium": "⚛幻数", "multiharm": "🎵多谐波"}
+                    algo_labels = {"original": "🔗原版", "legacy": "同频反相", "yinyang": "☀☽双频", "fusion": "⚡融合", "schumann": "🌍舒曼锚", "water": "💧水共振", "jellium": "⚛幻数", "multiharm": "🎵多谐波", "wuyin": "🎵五音"}
                     algo_label = algo_labels.get(use_algo, use_algo)
                     self.add_log(f"  ⚡ {len(abn)}项异常: {', '.join(organ_names[:3])} [{algo_label}]")
 
@@ -727,6 +899,8 @@ class Balancer:
                         balanced = self.balance_jellium(deltas)
                     elif use_algo == "multiharm":
                         balanced = self.balance_multiharm(deltas)
+                    elif use_algo == "wuyin":
+                        balanced = self.balance_wuyin(deltas)
                     else:
                         balanced = self.balance_legacy(deltas)
 
@@ -737,13 +911,14 @@ class Balancer:
                         ch1amp = item.get("ch1amp", "?")
                         ch2b9 = item.get("ch2b9", item.get("b9", "?"))
                         ch2amp = item.get("ch2amp", "?")
-                        f1 = 7.3728 * (2 ** (ch1b9 / 4)) * 3
-                        f2 = 7.3728 * (2 ** (ch2b9 / 4)) * 3
+                        # f = 7.3728 / 2^((b9-14)/2) MHz → kHz
+                        f1 = 7.3728 / (2 ** ((ch1b9 - 14) / 2)) * 1000  # kHz
+                        f2 = 7.3728 / (2 ** ((ch2b9 - 14) / 2)) * 1000  # kHz
                         diff_f = abs(f1 - f2)
                         ratio = f"{ch1amp/ch2amp:.2f}" if isinstance(ch2amp, (int,float)) and ch2amp > 0 else "∞"
-                        ch1f = f"{f1:.2f}" if f1 < 1000 else f"{f1/1000:.3f}M"
-                        ch2f = f"{f2:.2f}" if f2 < 1000 else f"{f2/1000:.3f}M"
-                        diffs = f"{diff_f:.2f}" if diff_f < 1000 else f"{diff_f/1000:.3f}M"
+                        ch1f = f"{f1:.2f}k" if f1 < 1000 else f"{f1/1000:.2f}M"
+                        ch2f = f"{f2:.2f}k" if f2 < 1000 else f"{f2/1000:.2f}M"
+                        diffs = f"{diff_f:.2f}k" if diff_f < 1000 else f"{diff_f/1000:.2f}M"
                         dir_str = item.get("direction", "")
                         cnt = item.get("count", 1)
                         extra = f" ×{cnt}对" if cnt > 1 else ""
@@ -836,7 +1011,7 @@ class Balancer:
         best = max([(p_org, "🔗原版"), (p_leg, "同频反相"), (p_yy, "☀☽双频"), (p_fus, "⚡融合"), (p_sch, "🌍舒曼锚"), (p_h2o, "💧水共振"), (p_jel, "⚛幻数")], key=lambda x: x[0])
 
         report = (
-            f"╔═══ NLS 八维算法对比报告 (第{self._batch_num}遍) ═══\n"
+            f"╔═══ NLS 九维算法对比报告 (第{self._batch_num}遍) ═══\n"
             f"║ 时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
             f"║ 耦合度: {coupling}/100\n"
             f"║────────────────────────────────────────────\n"
@@ -952,15 +1127,22 @@ canvas{display:block;margin:0 auto;border-radius:8px}
   <button class="btn btn-stop cmp-btn" id="btnCmp" onclick="stopAndCompare()" style="display:none">📊 停止&对比</button>
   <button class="btn btn-cal" onclick="api('/calibrate')">📐 校准基线</button>
   <button class="btn btn-cal" onclick="verifyPhase()" style="color:#ffaa00">🔬 验相位</button>
+  <button class="btn btn-cal" onclick="diagCh()" style="color:#7c4dff;font-size:11px">🔬 信道诊断</button>
 </div>
 <div class="card" style="padding:8px 12px">
   <div style="display:flex;justify-content:space-between;align-items:center">
-    <b>⚖ 八维对比</b>
+    <b>⚖ 九维对比</b>
     <span style="display:flex;align-items:center;gap:6px">
       <span id="baselineDot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#f44" title="基线状态"></span>
       <span id="couplingBadge" style="font-size:10px;color:#888">∿ --</span>
       <span id="entropyBadge" style="font-size:10px;color:#888">H --</span>
     </span>
+  </div>
+  <div style="display:flex;align-items:center;gap:6px;margin:4px 0">
+    <span style="font-size:10px;color:#888">灵敏度</span>
+    <input type="range" id="scanAmpSlider" min="3" max="80" value="20" style="flex:1;accent-color:#7c4dff;height:4px" oninput="setScanAmp(this.value)">
+    <span id="scanAmpVal" style="font-size:11px;color:#aaa;min-width:28px">20</span>
+    <button class="algo-btn" onclick="autoTune()" style="font-size:10px;padding:2px 8px;white-space:nowrap" title="自动扫10档振幅找最优性价比">🎯 一键最优</button>
   </div>
   <div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap">
     <button class="algo-btn" onclick="setAlgo('original')" id="abORG">🔗原版</button>
@@ -971,7 +1153,8 @@ canvas{display:block;margin:0 auto;border-radius:8px}
     <button class="algo-btn" onclick="setAlgo('water')" id="abH2O">💧水</button>
     <button class="algo-btn" onclick="setAlgo('jellium')" id="abJEL">⚛幻数</button>
     <button class="algo-btn" onclick="setAlgo('multiharm')" id="abMH">🎵多谐波</button>
-    <button class="algo-btn active" onclick="setAlgo('ab')" id="abAB">🔄八维</button>
+    <button class="algo-btn" onclick="setAlgo('wuyin')" id="abWY">🎵五音</button>
+    <button class="algo-btn active" onclick="setAlgo('ab')" id="abAB">🔄九维</button>
   </div>
   <div id="abStats" style="font-size:10px;color:#aaa;margin-top:4px"></div>
   <div id="abBars" style="margin-top:3px;display:none">
@@ -1028,7 +1211,7 @@ canvas{display:block;margin:0 auto;border-radius:8px}
   <canvas id="cvRadar" width="584" height="260"></canvas>
 </div>
 <div class="card view" id="view_compare">
-  <b style="color:#888;font-size:11px">⚖ 八维算法对比 (改善率)</b>
+  <b style="color:#888;font-size:11px">⚖ 九维算法对比 (改善率)</b>
   <canvas id="cvCompare" width="584" height="280"></canvas>
 </div>
 <div class="card view" id="view_ridge">
@@ -1063,13 +1246,13 @@ function drawRadar(items){
   var sums=[0,0,0,0,0],cnts=[0,0,0,0,0];
   for(var i=0;i<items.length;i++){
     var wu=items[i].wuxing;
-    for(var j=0;j<5;j++){if(wu===names[j]){sums[j]+=Math.abs(items[i].delta);cnts[j]++;break}}
+    for(var j=0;j<5;j++){if(wu===names[j]){sums[j]+=items[i].delta;cnts[j]++;break}}
   }
   var vals=[];for(var i=0;i<5;i++){vals.push(cnts[i]>0?sums[i]/cnts[i]:0)}
   //debug('radar:vals='+vals.map(function(v){return v.toFixed(1)}).join(',')+' sums='+sums.join(',')+' cnts='+cnts.join(','));
 
   var cx=w/2,cy=h/2+5,radius=Math.min(cx,cy)-50,n=5;
-  var mx=Math.max(10,Math.max.apply(null,vals.map(Math.abs)));
+  var scaleMax=100; // fixed scale matching mobile coerceIn(-100,100)
   // Rings (white visible grid, matching phone v7.25)
   for(var ring=1;ring<=3;ring++){
     ctx.beginPath();ctx.strokeStyle='rgba(255,255,255,0.2)';ctx.lineWidth=1.5;
@@ -1086,21 +1269,21 @@ function drawRadar(items){
     ctx.fillStyle=colors[i];ctx.font='bold 26px system-ui';ctx.textAlign='center';
     ctx.fillText(names[i],cx+(radius+28)*Math.cos(a),cy+(radius+28)*Math.sin(a)+9);
   }
-  // Data polygon (green pentagon — uses abs values for outward shape)
+  // Data polygon (green pentagon — mobile ratio: (val+100)/200 maps [-100,100]→[0,1])
   ctx.beginPath();ctx.strokeStyle='#00ff88';ctx.lineWidth=3;
   ctx.fillStyle='rgba(68,255,136,0.28)';
   var hasData=false;
   for(var i=0;i<n;i++){
-    var a=-Math.PI/2+2*Math.PI*i/n,v=vals[i];
-    var rr=radius*Math.abs(v)/mx;  // always outward, sign shown by dot color
+    var a=-Math.PI/2+2*Math.PI*i/n,v=Math.max(-scaleMax,Math.min(scaleMax,vals[i]));
+    var rr=radius*(v+scaleMax)/(2*scaleMax); // mobile ratio mapping → always visible
     if(Math.abs(v)>0.01)hasData=true;
     i==0?ctx.moveTo(cx+rr*Math.cos(a),cy+rr*Math.sin(a)):ctx.lineTo(cx+rr*Math.cos(a),cy+rr*Math.sin(a));
   }
   ctx.closePath();ctx.fill();ctx.stroke();
-  // Vertex dots (sign reflected: positive=outward, negative=inward from center)
+  // Vertex dots — at polygon vertices, colored by sign
   for(var i=0;i<n;i++){
-    var a=-Math.PI/2+2*Math.PI*i/n,v=vals[i];
-    var rr=radius*Math.abs(v)/mx;if(v<0)rr=-rr;
+    var a=-Math.PI/2+2*Math.PI*i/n,v=Math.max(-scaleMax,Math.min(scaleMax,vals[i]));
+    var rr=radius*(v+scaleMax)/(2*scaleMax);
     ctx.beginPath();ctx.arc(cx+rr*Math.cos(a),cy+rr*Math.sin(a),6,0,Math.PI*2);
     ctx.fillStyle=v>0?'#ff4444':v<0?'#4488ff':'#888';ctx.fill();
     ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();
@@ -1128,11 +1311,11 @@ function drawCompare(items){
   var ab=document.getElementById('abStats');
   if(!items||items.length<3){
     ctx.fillStyle='#555';ctx.font='13px system-ui';ctx.textAlign='center';
-    ctx.fillText('等待统计…(需完成至少一轮八维扫描)',w/2,h/2);
+    ctx.fillText('等待统计…(需完成至少一轮九维扫描)',w/2,h/2);
     return;
   }
   var algoColors=['#ffcc44','#ff6644','#ffaa00','#44ff44','#4488ff','#44ccff','#ff6688','#ff88cc'];
-  var algoNames={original:'🔗原版',legacy:'同频反相',yinyang:'☀☽双频',fusion:'⚡融合',schumann:'🌍舒曼锚',water:'💧水共振',jellium:'⚛幻数',multiharm:'🎵多谐波'};
+  var algoNames={original:'🔗原版',legacy:'同频反相',yinyang:'☀☽双频',fusion:'⚡融合',schumann:'🌍舒曼锚',water:'💧水共振',jellium:'⚛幻数',multiharm:'🎵多谐波',wuyin:'🎵五音'};
   var barH=(h-40)/Math.max(items.length,1);
   for(var i=0;i<items.length;i++){
     var d=items[i],total=Math.max(1,d.imp+d.wors),rate=d.imp/total;
@@ -1233,14 +1416,40 @@ function drawRidge(items){
 var lastData=[],ridgeCache=[];
 
 function api(path){fetch(path).then(function(){poll()}).catch(function(e){debug('API错误:'+e)})}
-var calDone=false, calRunning=false;
+var calDone=false, calRunning=false, baselineEverDone=false;
+
+function setScanAmp(v){
+  document.getElementById('scanAmpVal').textContent=v;
+  fetch('/set_scan_amp/'+v).then(function(r){return r.json()}).then(function(d){
+    if(d.ok){document.getElementById('baselineDot').style.background='#f44'}
+  });
+}
+
+function autoTune(){
+  var btn=document.querySelector('[onclick=\"autoTune()\"]');
+  var orig=btn.textContent; btn.textContent='扫描中…'; btn.disabled=true;
+  fetch('/auto_tune').then(function(r){return r.json()}).then(function(d){
+    if(d.ok){
+      document.getElementById('scanAmpSlider').value=d.optimal_amp;
+      document.getElementById('scanAmpVal').textContent=d.optimal_amp;
+      document.getElementById('baselineDot').style.background='#f44';
+      // 显示per-b9分布
+      var info=d.tuned_b9+'/18频段独立调谐';
+      if(d.per_b9_amp){
+        var amps={};Object.keys(d.per_b9_amp).forEach(function(k){var a=d.per_b9_amp[k];amps[a]=(amps[a]||0)+1});
+        info+=', 分布:'+JSON.stringify(amps);
+      }
+    }
+    btn.textContent=orig; btn.disabled=false;
+  }).catch(function(){btn.textContent=orig; btn.disabled=false});
+}
 
 function doCalibrate(){
   if(calRunning)return;calRunning=true;
   var btn=document.getElementById('calStartBtn'),st=document.getElementById('calStatus');
   btn.disabled=true;btn.textContent='校准中…';st.textContent='正在扫描 18 个频段…';
   fetch('/calibrate').then(function(r){return r.json()}).then(function(d){
-    if(d.ok){st.innerHTML='<b style=\"color:#00ff88\">✅ 校准成功!</b>';calDone=true;setTimeout(function(){document.getElementById('calOverlay').classList.add('hidden')},1200)}
+    if(d.ok){st.innerHTML='<b style=\"color:#00ff88\">✅ 校准成功!</b>';calDone=true;baselineEverDone=true;setTimeout(function(){document.getElementById('calOverlay').classList.add('hidden')},1200)}
     else{st.textContent='❌ 失败: '+d.msg;btn.disabled=false;btn.textContent='📐 重试'}
   }).catch(function(){st.textContent='❌ 网络错误';btn.disabled=false;btn.textContent='📐 重试'}).finally(function(){calRunning=false});
 }
@@ -1256,6 +1465,10 @@ function verifyPhase(){
     });
     s.innerHTML='<b style=color:#0f8>结果:</b><br>'+lines.join('<br>');
   }).catch(function(){s.textContent='❌ 网络错误'});
+}
+
+function diagCh(){
+  api('/diag_channels');
 }
 
 function setAlgo(mode){
@@ -1346,20 +1559,27 @@ function poll(){
     if(s.playing||s.scanning){btnS.style.display='none';btnX.style.display='inline-block';btnC.style.display='inline-block'}
     else{btnS.style.display='inline-block';btnX.style.display='none';btnC.style.display='none'}
 
-    // Calibration overlay auto-trigger
+    // Calibration overlay: only auto-show on FIRST load (never had baseline)
     var ov=document.getElementById('calOverlay');
-    if(s.connected&&!s.has_baseline&&!calDone){
+    if(s.has_baseline) baselineEverDone = true;
+    if(!s.has_baseline && !baselineEverDone && s.connected){
       ov.classList.remove('hidden');
-    }else if(calDone||s.has_baseline){
-      ov.classList.add('hidden');
     }
 
     // Baseline dot
     document.getElementById('baselineDot').style.background=s.has_baseline?'#00ff88':'#f44';
+    // Sync scan amp slider (only if not currently dragging)
+    if(s.scan_amp && document.getElementById('scanAmpVal')){
+      var sl=document.getElementById('scanAmpSlider');
+      if(document.activeElement!==sl){
+        sl.value=s.scan_amp;
+        document.getElementById('scanAmpVal').textContent=s.scan_amp;
+      }
+    }
 
     var st=document.getElementById('stats');
     if(s.playing){
-      var algoNames={original:'🔗原版',legacy:'同频反相',yinyang:'☀☽双频',fusion:'⚡融合',schumann:'🌍舒曼锚',water:'💧水共振',jellium:'⚛幻数',multiharm:'🎵多谐波'};
+      var algoNames={original:'🔗原版',legacy:'同频反相',yinyang:'☀☽双频',fusion:'⚡融合',schumann:'🌍舒曼锚',water:'💧水共振',jellium:'⚛幻数',multiharm:'🎵多谐波',wuyin:'🎵五音'};
       var curAlgo=s.current_algo||s.algo;
       st.innerHTML='<b>● 第'+s.round+'轮</b> ['+algoNames[curAlgo]+'] | 改善<b>'+s.improved+'</b> 恶化<b>'+s.worsened+'</b>';
     }
@@ -1368,7 +1588,7 @@ function poll(){
     else if((s.log||[])[0]&&s.log[0].indexOf('📐 校准')>=0){st.innerHTML='<span style="color:#ffaa00">📐 校准中...</span>'}
     else{st.innerHTML='○ 待机'}
 
-    // 八维对比统计 + 颜色条
+    // 九维对比统计 + 颜色条
     var ab=document.getElementById('abStats'),org=s.ab_original||{},leg=s.ab_legacy||{},yy=s.ab_yinyang||{},fus=s.ab_fusion||{},sch=s.ab_schumann||{},h2o=s.ab_water||{},jel=s.ab_jellium||{},mh=s.ab_multiharm||{};
     // Store for compare tab
     window._abStats_original=org;window._abStats_legacy=leg;window._abStats_yinyang=yy;
@@ -1570,6 +1790,37 @@ class WebHandler(BaseHTTPRequestHandler):
         elif p.path == "/verify_phase":
             result = self.balancer.calibrate_phase()
             self.send_json(result)
+        elif p.path == "/auto_tune":
+            if not self.balancer.ser or not self.balancer.ser.is_open:
+                self.balancer.connect()
+            if not self.balancer.ser or not self.balancer.ser.is_open:
+                self.send_json({"ok": False, "msg": "手环未连接"})
+                return
+            if self.balancer.running:
+                self.send_json({"ok": False, "msg": "请先停止循环"})
+                return
+            self.send_json({"ok": True, "msg": "调谐中…"})
+            threading.Thread(target=lambda: self.balancer.auto_tune_amp(), daemon=True).start()
+        elif p.path.startswith("/set_scan_amp/"):
+            try:
+                amp = int(p.path.split("/")[-1])
+                amp = max(3, min(80, amp))  # clamp 3-80
+                self.balancer.scan_amp = amp
+                self.balancer.status["scan_amp"] = amp
+                self.balancer.per_b9_amp = {}  # 手动调滑块→清除per-b9映射
+                # 改振幅必须重新校准(基线需匹配)
+                self.balancer.status["has_baseline"] = False
+                self.balancer.baseline = {}
+                self.balancer.add_log(f"⚙ 振幅已设为 {amp}（需重新校准基线）")
+                self.send_json({"ok": True, "scan_amp": amp})
+            except:
+                self.send_json({"ok": False, "msg": "无效振幅值"})
+        elif p.path == "/diag_channels":
+            if not self.balancer.ser or not self.balancer.ser.is_open:
+                self.send_json({"ok": False, "msg": "手环未连接"})
+                return
+            self.send_json({"ok": True, "msg": "诊断中…"})
+            threading.Thread(target=lambda: self.balancer.diag_channels(), daemon=True).start()
         elif p.path == "/save":
             self.balancer._save_snapshot()
             self.send_json({"ok": True})

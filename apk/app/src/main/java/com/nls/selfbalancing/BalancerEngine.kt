@@ -226,12 +226,12 @@ class BalancerEngine(private val ctx: Context) {
                 val useAlgo = if (algoMode == "ab") {
                     if (algoQueue.isEmpty()) {
                         batchNum++
-                        algoQueue = mutableListOf("original", "legacy", "yinyang", "fusion", "schumann", "water", "jellium", "multiharm")
+                        algoQueue = mutableListOf("original", "legacy", "yinyang", "fusion", "schumann", "water", "jellium", "multiharm", "wuyin")
                         algoQueue.shuffle()
                         val labels = algoQueue.joinToString(" → ") {
                             mapOf("original" to "🔗原版", "legacy" to "同频", "yinyang" to "☀☽",
                                 "fusion" to "融合", "schumann" to "舒曼", "water" to "水共振", "jellium" to "⚛幻数",
-                                "multiharm" to "🎵多谐波").getOrDefault(it, it)
+                                "multiharm" to "🎵多谐波", "wuyin" to "🎵五音").getOrDefault(it, it)
                         }
                         onLog?.invoke("─── 第${batchNum}遍: $labels ───")
                     }
@@ -240,7 +240,7 @@ class BalancerEngine(private val ctx: Context) {
 
                 val label = mapOf("original" to "🔗原版", "legacy" to "同频反相", "yinyang" to "☀☽双频",
                     "fusion" to "⚡融合", "schumann" to "🌍舒曼锚", "water" to "💧水共振", "jellium" to "⚛幻数",
-                    "multiharm" to "🎵多谐波")
+                    "multiharm" to "🎵多谐波", "wuyin" to "🎵五音")
                     .getOrDefault(useAlgo, useAlgo)
                 onLog?.invoke("第${round}轮 — 扫描中… [$label]")
                 onStatus?.invoke(label)
@@ -278,6 +278,7 @@ class BalancerEngine(private val ctx: Context) {
                             "water" -> treatWater(band.b9, delta, adjust)
                             "jellium" -> treatJellium(band.b9, delta, adjust)
                             "multiharm" -> treatMultiHarmonic(band.b9, delta, adjust)
+                            "wuyin" -> treatWuyin(band.b9, delta, adjust)
                             else -> treatLegacy(band.b9, delta, adjust)
                         }
                         val extra = if (lastTx.count > 1) " ×${lastTx.count}对" else ""
@@ -310,10 +311,10 @@ class BalancerEngine(private val ctx: Context) {
                         val rate = if (total > 0) "${(st.imp * 100 / total).toInt()}%" else "--"
                         val name = mapOf("original" to "🔗原版", "legacy" to "同频", "yinyang" to "☀☽",
                             "fusion" to "融合", "schumann" to "舒曼", "water" to "水共振", "jellium" to "⚛幻数",
-                            "multiharm" to "🎵多谐波")[algo] ?: algo
+                            "multiharm" to "🎵多谐波", "wuyin" to "🎵五音")[algo] ?: algo
                         parts.add("$name $rate")
                     }
-                    onLog?.invoke("════ 第${prevBatch}遍七维对比: ${parts.joinToString(" │ ")} ════")
+                    onLog?.invoke("════ 第${prevBatch}遍九维对比: ${parts.joinToString(" │ ")} ════")
                 }
 
                 onProgress?.invoke(bands.size, bands.size)
@@ -489,6 +490,34 @@ class BalancerEngine(private val ctx: Context) {
             lastTx = TxInfo(ch1b9, ch1Amp, ch2b9, ch2Amp, 5)
             if (i < 4) try { Thread.sleep(40) } catch (_: Exception) {}
         }
+    }
+
+    // ── ⑨ 五音: 宫商角徵羽→五行→b9异频双通道 (√2频率比, PCAP振幅) ──
+    // 原理: b9步进1对应频率比√2≈1.414(近纯五度), 双通道差拍产生五行调谐干涉
+    private val WUYIN_SEQ = listOf(
+        // label, ch1b9, ch2b9, wx, phaseMs
+        Triple("宫(土)", 22, 20, "土"),    // 脾 461kHz/922kHz 纯八度
+        Triple("商(金)", 23, 22, "金"),    // 肺 326kHz/461kHz 近纯四度
+        Triple("角(木)", 16, 15, "木"),    // 肝 3.69M/5.21M 近纯四度
+        Triple("羽(水)", 30, 28, "水"),    // 肾 29kHz/58kHz 纯八度
+        Triple("徵(火)", 27, 25, "火"),    // 心 81kHz/163kHz 纯八度
+    )
+    private var wuyinIdx = 0  // 轮转索引
+
+    private fun treatWuyin(b9: Int, delta: Double, adjust: Int) {
+        val base = cureBaseAmp(b9)
+        // 找到最近的五音映射
+        val (label, ch1b9, ch2b9, wx) = WUYIN_SEQ[wuyinIdx % WUYIN_SEQ.size]
+        wuyinIdx++
+        val b11 = if (delta > 0) (base - adjust).coerceIn(3, 172)
+                 else (base + adjust).coerceIn(3, 172)
+        val b15 = if (delta > 0) (base + adjust).coerceIn(3, 172)
+                 else (base - adjust).coerceIn(3, 172)
+        buf.fill(0); buf[9] = ch1b9.toByte(); buf[11] = b11.toByte()
+        buf[13] = ch2b9.toByte(); buf[15] = b15.toByte()
+        try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
+        lastTx = TxInfo(ch1b9, b11, ch2b9, b15)
+        onLog?.invoke("    🎵$label CH1=${ch1b9} CH2=${ch2b9} | ${lastTx.fmt()}")
     }
 
     fun stop() {
