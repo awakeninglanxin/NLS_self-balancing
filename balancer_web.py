@@ -1086,18 +1086,18 @@ function drawRadar(items){
     ctx.fillStyle=colors[i];ctx.font='bold 26px system-ui';ctx.textAlign='center';
     ctx.fillText(names[i],cx+(radius+28)*Math.cos(a),cy+(radius+28)*Math.sin(a)+9);
   }
-  // Data polygon (green pentagon, matching phone v7.25)
+  // Data polygon (green pentagon — uses abs values for outward shape)
   ctx.beginPath();ctx.strokeStyle='#00ff88';ctx.lineWidth=3;
   ctx.fillStyle='rgba(68,255,136,0.28)';
   var hasData=false;
   for(var i=0;i<n;i++){
     var a=-Math.PI/2+2*Math.PI*i/n,v=vals[i];
-    var rr=radius*Math.abs(v)/mx;if(v<0)rr=-rr;
+    var rr=radius*Math.abs(v)/mx;  // always outward, sign shown by dot color
     if(Math.abs(v)>0.01)hasData=true;
     i==0?ctx.moveTo(cx+rr*Math.cos(a),cy+rr*Math.sin(a)):ctx.lineTo(cx+rr*Math.cos(a),cy+rr*Math.sin(a));
   }
   ctx.closePath();ctx.fill();ctx.stroke();
-  // Vertex dots (larger, matching phone)
+  // Vertex dots (sign reflected: positive=outward, negative=inward from center)
   for(var i=0;i<n;i++){
     var a=-Math.PI/2+2*Math.PI*i/n,v=vals[i];
     var rr=radius*Math.abs(v)/mx;if(v<0)rr=-rr;
