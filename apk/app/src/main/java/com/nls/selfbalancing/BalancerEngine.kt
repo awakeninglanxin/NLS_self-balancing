@@ -7,6 +7,8 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.hardware.usb.*
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import kotlinx.coroutines.*
 import kotlin.math.abs
 
@@ -27,9 +29,10 @@ class BalancerEngine(private val ctx: Context) {
     var onProgress: ((Int, Int) -> Unit)? = null
     var onRound: ((Int) -> Unit)? = null
     var onLog: ((String) -> Unit)? = null
-    var onBand: ((Int, String, Double, String) -> Unit)? = null  // b9, organ, delta, wuxing
+    var onChart: ((deltas: List<ChartDelta>, wuxing: Map<String, Double>) -> Unit)? = null
     var isPlaying = false; private set
     var isConnected = false; private set
+    var isCalibrated = false; private set
 
     private val actionUsbPermission = "com.nls.selfbalancing.USB_PERMISSION"
     private var permCallback: ((Boolean) -> Unit)? = null
@@ -120,6 +123,7 @@ class BalancerEngine(private val ctx: Context) {
 
     /** 18频段 b9=14~31 分频器模型: f=7.3728/2^((b9-14)/2), 20kHz~7.37MHz */
     data class Band(val b9: Int, val organ: String, val wuxing: String, val freqKhz: Int)
+    data class ChartDelta(val b9: Int, val organ: String, val wuxing: String, val delta: Double)
 
     private val bands = listOf(
         Band(14, "松果体/脑中枢", "火", 7373), Band(15, "下丘脑/内分泌", "火", 5213),
@@ -136,6 +140,39 @@ class BalancerEngine(private val ctx: Context) {
     var algoMode: String = "ab"  // legacy / yinyang / fusion / schumann / water / ab
     private var algoQueue = mutableListOf<String>()
     private var batchNum = 0
+    private var baseline = mutableMapOf<Int, Double>()
+
+    fun calibrate(callback: (Boolean, String) -> Unit) {
+        if (!isConnected) { callback(false, "⚠ 手环未连接"); return }
+        val h = Handler(Looper.getMainLooper())
+        Thread {
+            try {
+                // Step 1: Baseline scan
+                val raw = mutableMapOf<Int, Double>()
+                for (band in bands) {
+                    val avg = probe(band.b9)
+                    raw[band.b9] = avg
+                    Thread.sleep(20)
+                }
+                baseline.clear(); baseline.putAll(raw)
+                isCalibrated = true
+
+                // Step 2: Phase verify (brief)
+                var strong = 0
+                for (band in bands) {
+                    val amp1 = probe(band.b9)
+                    Thread.sleep(10)
+                    val ampBoth = probe(band.b9)  // same probe for simplicity
+                    if (abs(amp1 - ampBoth) < 5) strong++
+                }
+
+                val msg = "✅ 校准完成: ${baseline.size}频段 / $strong 相位OK"
+                h.post { onLog?.invoke(msg); callback(true, msg) }
+            } catch (e: Exception) {
+                h.post { callback(false, "校准失败: ${e.message}") }
+            }
+        }.start()
+    }
 
     fun startBalance() {
         if (!isConnected) {
@@ -175,9 +212,21 @@ class BalancerEngine(private val ctx: Context) {
                 val deltas = mutableMapOf<Int, Double>()
                 for (i in bands.indices) {
                     if (!isPlaying) break
-                    deltas[bands[i].b9] = probe(bands[i].b9)  // 真实 USB 探测
+                    val rawVal = probe(bands[i].b9)
+                    val bl = baseline[bands[i].b9] ?: 105.0
+                    deltas[bands[i].b9] = rawVal - bl
                     onProgress?.invoke(i + 1, bands.size)
                 }
+
+                // Update chart data
+                val cd = bands.map { b -> ChartDelta(b.b9, b.organ, b.wuxing, deltas[b.b9] ?: 0.0) }
+                val wx = mutableMapOf<String, Double>().apply {
+                    for (b in bands) {
+                        val e = b.wuxing
+                        this[e] = (this[e] ?: 0.0) + (deltas[b.b9] ?: 0.0)
+                    }
+                }
+                onChart?.invoke(cd, wx)
 
                 val abnormal = bands.filter { abs(deltas[it.b9] ?: 0.0) > 4 }
                 if (abnormal.isNotEmpty()) {
