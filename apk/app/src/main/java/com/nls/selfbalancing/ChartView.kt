@@ -50,7 +50,7 @@ class ChartView @JvmOverloads constructor(
         val cx = w / 2; val cy = h / 2 + 10f; val r = min(w, h) * 0.35f
 
         val elements = listOf("火", "土", "金", "水", "木")
-        val colors = mapOf("火" to "ff4444", "土" to "ffaa00", "金" to "ffff44", "水" to "4488ff", "木" to "44ff44")
+        val colors = mapOf("火" to "ff4444", "土" to "ffdd00", "金" to "ffffff", "水" to "4488ff", "木" to "44ff44")
         val angles = elements.mapIndexed { i, _ -> -PI / 2 + i * 2 * PI / 5 }
 
         // Grid circles
@@ -69,9 +69,11 @@ class ChartView @JvmOverloads constructor(
         // Axes
         for (a in angles) {
             canvas.drawLine(cx, cy, cx + r * cos(a).toFloat(), cy + r * sin(a).toFloat(), gridPaint)
-            textPaint.textSize = 26f
-            canvas.drawText(elements[angles.indexOf(a)], cx + (r + 30f) * cos(a).toFloat(),
-                cy + (r + 30f) * sin(a).toFloat() + 8f, textPaint)
+            val el = elements[angles.indexOf(a)]
+            textPaint.color = Color.parseColor("#${colors[el]}")
+            textPaint.textSize = 52f
+            canvas.drawText(el, cx + (r + 35f) * cos(a).toFloat(),
+                cy + (r + 35f) * sin(a).toFloat() + 18f, textPaint)
         }
 
         // Radar polygon
