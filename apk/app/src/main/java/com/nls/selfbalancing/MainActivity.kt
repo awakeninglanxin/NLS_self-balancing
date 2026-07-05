@@ -11,8 +11,11 @@ import android.view.ViewGroup
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import java.io.File
 import java.io.PrintWriter
 import java.io.StringWriter
+import java.text.SimpleDateFormat
+import java.util.*
 
 class MainActivity : AppCompatActivity() {
     private lateinit var engine: BalancerEngine
@@ -25,6 +28,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusDot: View
     private lateinit var statusText: TextView
     private lateinit var calBtn: TextView
+    private lateinit var exportBtn: TextView
     private lateinit var connectBtn: TextView
     private lateinit var balanceBtn: TextView
     private lateinit var stopBtn: TextView
@@ -33,6 +37,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var progress: ProgressBar
     private lateinit var logContainer: LinearLayout
     private lateinit var tabHost: LinearLayout
+    private val logHistory = mutableListOf<String>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val oldHandler = Thread.getDefaultUncaughtExceptionHandler()
@@ -61,6 +66,7 @@ class MainActivity : AppCompatActivity() {
 
         connectBtn.setOnClickListener { onConnect() }
         calBtn.setOnClickListener { onCalibrate() }
+        exportBtn.setOnClickListener { onExport() }
         balanceBtn.setOnClickListener { onBalance() }
         stopBtn.setOnClickListener { engine.stop(); updateUI() }
 
@@ -71,6 +77,7 @@ class MainActivity : AppCompatActivity() {
         statusDot = findViewById(R.id.statusDot)
         statusText = findViewById(R.id.statusText)
         calBtn = findViewById(R.id.calBtn)
+        exportBtn = findViewById(R.id.exportBtn)
         connectBtn = findViewById(R.id.connectBtn)
         balanceBtn = findViewById(R.id.balanceBtn)
         stopBtn = findViewById(R.id.stopBtn)
@@ -192,6 +199,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun addLog(msg: String) {
+        logHistory.add(msg)
         val tv = TextView(this).apply {
             text = msg; textSize = 11f
             val color = when {
@@ -206,6 +214,27 @@ class MainActivity : AppCompatActivity() {
         }
         logContainer.addView(tv, 0)
         if (logContainer.childCount > 50) logContainer.removeViewAt(logContainer.childCount - 1)
+    }
+
+    private fun onExport() {
+        try {
+            val sdf = SimpleDateFormat("yyyy-MM-dd_HH-mm", Locale.getDefault())
+            val filename = "NLS_Balance_${sdf.format(Date())}.txt"
+            val dir = getExternalFilesDir(null) ?: filesDir
+            val file = File(dir, filename)
+            PrintWriter(file).use { pw ->
+                pw.println("NLS 动态平衡仪 — 日志导出")
+                pw.println("时间: ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())}")
+                pw.println("=" .repeat(40))
+                for (line in logHistory) pw.println(line)
+                pw.println("=" .repeat(40))
+                pw.println("文件路径: $file")
+            }
+            addLog("💾 已导出: $filename")
+            Toast.makeText(this, "已保存: $file", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            addLog("导出失败: ${e.message}")
+        }
     }
 
     override fun onDestroy() { engine.destroy(); super.onDestroy() }

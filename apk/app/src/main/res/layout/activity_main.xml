@@ -55,6 +55,18 @@
             android:layout_marginEnd="4dp" />
 
         <TextView
+            android:id="@+id/exportBtn"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="💾"
+            android:textColor="#ffdd00"
+            android:textSize="14sp"
+            android:paddingHorizontal="4dp"
+            android:clickable="true"
+            android:focusable="true"
+            android:layout_marginEnd="4dp" />
+
+        <TextView
             android:id="@+id/connectBtn"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
