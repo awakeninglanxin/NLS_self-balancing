@@ -3,66 +3,182 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:padding="12dp"
+    android:padding="16dp"
     android:background="#0a0a14">
 
     <!-- Header -->
-    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:gravity="center" android:paddingBottom="8dp">
-        <TextView android:id="@+id/header2" android:text="NLS 动态平衡仪 v7"
-            android:textColor="#00ff88" android:textSize="20sp" android:textStyle="bold" />
-    </LinearLayout>
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="NLS 动态平衡仪 v7.5"
+        android:textColor="#00e5a0"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="12dp" />
 
     <!-- Status Bar -->
-    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:gravity="center_vertical" android:padding="6dp" android:background="#111122"
-        android:orientation="horizontal">
-        <View android:id="@+id/statusDot" android:layout_width="10dp" android:layout_height="10dp"
-            android:background="#ff4444" android:layout_marginEnd="8dp" />
-        <TextView android:id="@+id/statusText" android:text="未连接"
-            android:textColor="#aaa" android:textSize="13sp" android:layout_weight="1" />
-        <Button android:id="@+id/connectBtn" android:text="连接手环"
-            android:textSize="12sp" android:paddingHorizontal="12dp" android:paddingVertical="4dp" />
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:padding="8dp"
+        android:background="#111122"
+        android:layout_marginBottom="8dp">
+
+        <View
+            android:id="@+id/statusDot"
+            android:layout_width="10dp"
+            android:layout_height="10dp"
+            android:background="#ff4444"
+            android:layout_marginEnd="8dp" />
+
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="未连接"
+            android:textColor="#aaa"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/connectBtn"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="连接手环"
+            android:textColor="#00e5a0"
+            android:textSize="13sp"
+            android:padding="6dp"
+            android:clickable="true"
+            android:focusable="true"
+            android:background="?attr/selectableItemBackground" />
     </LinearLayout>
 
     <!-- Round & Algorithm -->
-    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:gravity="center" android:paddingTop="8dp" android:paddingBottom="0dp" android:orientation="horizontal">
-        <TextView android:id="@+id/roundText" android:text="第0轮"
-            android:textColor="#4488ff" android:textSize="16sp" android:textStyle="bold" />
-        <TextView android:id="@+id/algoText" android:text=""
-            android:textColor="#ffaa00" android:textSize="13sp" android:layout_marginStart="16dp" />
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:orientation="horizontal"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp">
+
+        <TextView
+            android:id="@+id/roundText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="第0轮"
+            android:textColor="#4488ff"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/algoText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textColor="#ffaa00"
+            android:textSize="13sp"
+            android:layout_marginStart="16dp" />
     </LinearLayout>
 
     <!-- Progress -->
-    <ProgressBar android:id="@+id/progress" style="?android:attr/progressBarStyleHorizontal"
-        android:layout_width="match_parent" android:layout_height="6dp"
-        android:max="18" android:progress="0" android:layout_marginTop="4dp" android:layout_marginBottom="0dp" />
+    <ProgressBar
+        android:id="@+id/progress"
+        style="@style/Widget.AppCompat.ProgressBar.Horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="6dp"
+        android:max="18"
+        android:progress="0"
+        android:layout_marginTop="4dp"
+        android:layout_marginBottom="4dp" />
 
-    <!-- Scan Results (scrollable) -->
-    <TextView android:text="⚠ 频段偏差" android:textColor="#888" android:textSize="11sp" android:paddingTop="4dp" android:paddingBottom="0dp" />
-    <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="3"
+    <!-- Scan Results -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="⚠ 频段偏差"
+        android:textColor="#888"
+        android:textSize="11sp"
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp" />
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="3"
         android:background="#0d0d1a">
-        <LinearLayout android:id="@+id/bandsContainer" android:orientation="vertical"
-            android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="6dp" />
+
+        <LinearLayout
+            android:id="@+id/bandsContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="6dp" />
     </ScrollView>
 
-    <!-- Log (scrollable) -->
-    <TextView android:text="📋 运行日志" android:textColor="#888" android:textSize="11sp" android:paddingTop="4dp" android:paddingBottom="0dp" />
-    <ScrollView android:id="@+id/logScroll" android:layout_width="match_parent" android:layout_height="0dp"
-        android:layout_weight="2" android:background="#0d0d1a">
-        <LinearLayout android:id="@+id/logContainer" android:orientation="vertical"
-            android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="4dp" />
+    <!-- Log -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="📋 运行日志"
+        android:textColor="#888"
+        android:textSize="11sp"
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp" />
+
+    <ScrollView
+        android:id="@+id/logScroll"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="2"
+        android:background="#0d0d1a">
+
+        <LinearLayout
+            android:id="@+id/logContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="4dp" />
     </ScrollView>
 
     <!-- Buttons -->
-    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:orientation="horizontal" android:gravity="center" android:paddingTop="8dp">
-        <Button android:id="@+id/balanceBtn" android:text="▶ 启动平衡"
-            android:textColor="#fff" android:backgroundTint="#00aa55" android:textSize="14sp"
-            android:layout_width="0dp" android:layout_weight="1" android:layout_marginEnd="6dp" />
-        <Button android:id="@+id/stopBtn" android:text="⏹ 停止"
-            android:textColor="#fff" android:backgroundTint="#aa3333" android:textSize="14sp"
-            android:layout_width="0dp" android:layout_weight="1" android:layout_marginStart="6dp" />
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:paddingTop="8dp">
+
+        <TextView
+            android:id="@+id/balanceBtn"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="▶ 启动平衡"
+            android:textColor="#fff"
+            android:textSize="15sp"
+            android:gravity="center"
+            android:padding="14dp"
+            android:background="#00aa55"
+            android:clickable="true"
+            android:focusable="true"
+            android:layout_marginEnd="6dp" />
+
+        <TextView
+            android:id="@+id/stopBtn"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="⏹ 停止"
+            android:textColor="#fff"
+            android:textSize="15sp"
+            android:gravity="center"
+            android:padding="14dp"
+            android:background="#aa3333"
+            android:clickable="true"
+            android:focusable="true"
+            android:layout_marginStart="6dp" />
     </LinearLayout>
 </LinearLayout>

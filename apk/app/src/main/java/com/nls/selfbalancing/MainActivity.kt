@@ -17,9 +17,9 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var statusDot: View
     private lateinit var statusText: TextView
-    private lateinit var connectBtn: Button
-    private lateinit var balanceBtn: Button
-    private lateinit var stopBtn: Button
+    private lateinit var connectBtn: TextView
+    private lateinit var balanceBtn: TextView
+    private lateinit var stopBtn: TextView
     private lateinit var roundText: TextView
     private lateinit var algoText: TextView
     private lateinit var progress: ProgressBar
