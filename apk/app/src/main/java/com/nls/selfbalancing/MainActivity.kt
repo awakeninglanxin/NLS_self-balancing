@@ -48,7 +48,7 @@ class MainActivity : AppCompatActivity() {
 
         connectBtn?.setOnClickListener { onConnect() }
         balanceBtn?.setOnClickListener { onBalance() }
-        stopBtn?.setOnClickListener { onStop() }
+        stopBtn?.setOnClickListener { onStopClick() }
     }
 
     private fun setupCallbacks() {
@@ -79,7 +79,7 @@ class MainActivity : AppCompatActivity() {
         updateUI()
     }
 
-    private fun onStop() {
+    private fun onStopClick() {
         engine.stop()
         updateUI()
     }
