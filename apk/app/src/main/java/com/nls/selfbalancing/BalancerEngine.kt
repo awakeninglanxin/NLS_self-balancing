@@ -297,10 +297,16 @@ class BalancerEngine(private val ctx: Context) {
 
     // ── Algorithms ──
 
+    // ── ② Legacy: 异频反相 — CH1≠CH2, 反相振幅, beat=|f1-f2|增加有效调制深度 ──
     private fun treatLegacy(b9: Int, delta: Double, adjust: Int) {
         val b11 = if (delta > 0) (15 - adjust).coerceIn(3, 80) else (15 + adjust).coerceIn(3, 80)
         val b15 = if (delta > 0) (15 + adjust).coerceIn(3, 80) else (15 - adjust).coerceIn(3, 80)
-        sendProbe(b9, b11, b15)
+        // CH2频率偏移: 偏差越大偏移越大, b9±1~3, 创造差频 beat=|CH1-CH2|
+        val offset = (abs(delta) / 4).toInt().coerceIn(1, 3)
+        val ch2b9 = if (delta > 0) (b9 + offset).coerceIn(14, 31) else (b9 - offset).coerceIn(14, 31)
+        buf.fill(0); buf[9] = b9.toByte(); buf[11] = b11.toByte()
+        buf[13] = ch2b9.toByte(); buf[15] = b15.toByte()
+        try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
     }
 
     private val SUN_SEQ = intArrayOf(1, 2, 4, 8, 16, 32)
@@ -347,13 +353,17 @@ class BalancerEngine(private val ctx: Context) {
     private val WATER_MODES = doubleArrayOf(2.04, 3.42, 4.83, 7.78, 10.84, 13.94, 16.97, 19.56,
         24.16, 33.07, 48.31, 73.06, 99.76, 126.07, 164.17, 193.24, 216.02, 256.46, 309.88, 362.89, 415.13, 432.0)
 
+    // ── ⑥ Water: 异频水共振 — CH2=水团簇频率索引偏移, 振幅反相 ──
     private fun treatWater(b9: Int, delta: Double, adjust: Int) {
         val wIdx = ((b9 - 14) * WATER_MODES.size / 18).coerceIn(0, WATER_MODES.size - 1)
         val waterHz = WATER_MODES[wIdx]
         val b11 = if (delta > 0) (15 - adjust).coerceIn(3, 80) else (15 + adjust).coerceIn(3, 80)
         val b15 = if (delta > 0) (15 + adjust).coerceIn(3, 80) else (15 - adjust).coerceIn(3, 80)
+        // CH2 频率按水模式偏移
+        val ch2offset = if (waterHz < 50) 2 else if (waterHz < 200) 1 else -1
+        val ch2b9 = (b9 + ch2offset).coerceIn(14, 31)
         buf.fill(0); buf[9] = b9.toByte(); buf[11] = b11.toByte()
-        buf[13] = b9.toByte(); buf[15] = b15.toByte()
+        buf[13] = ch2b9.toByte(); buf[15] = b15.toByte()
         try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
     }
 
