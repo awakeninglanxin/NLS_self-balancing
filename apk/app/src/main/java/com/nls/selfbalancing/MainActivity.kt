@@ -1,5 +1,6 @@
 package com.nls.selfbalancing
 
+import android.app.AlertDialog
 import android.os.Bundle
 import android.os.Looper
 import android.os.Handler
@@ -7,6 +8,8 @@ import android.view.View
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import java.io.PrintWriter
+import java.io.StringWriter
 
 class MainActivity : AppCompatActivity() {
     private lateinit var engine: BalancerEngine
@@ -24,6 +27,26 @@ class MainActivity : AppCompatActivity() {
     private var logContainer: LinearLayout? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // ★ 全局崩溃捕获 — 闪退前必须显示错误信息
+        val oldHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, ex ->
+            val sw = StringWriter()
+            ex.printStackTrace(PrintWriter(sw))
+            val msg = "崩溃: ${ex.javaClass.simpleName}\n${ex.message ?: ""}\n${sw.toString().take(500)}"
+            try {
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle("💥 闪退诊断")
+                    .setMessage(msg.take(800))
+                    .setPositiveButton("知道了") { _, _ -> oldHandler?.uncaughtException(thread, ex) }
+                    .setCancelable(false)
+                    .show()
+            } catch (_: Exception) {
+                // AlertDialog also failed — show toast then die
+                try { Toast.makeText(this@MainActivity, msg.take(200), Toast.LENGTH_LONG).show(); Thread.sleep(3000) } catch (_: Exception) {}
+                oldHandler?.uncaughtException(thread, ex)
+            }
+        }
+
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 

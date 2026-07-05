@@ -11,8 +11,8 @@ android {
         applicationId = "com.nls.selfbalancing"
         minSdk = 24
         targetSdk = 34
-        versionCode = 10
-        versionName = "v7.3"
+        versionCode = 11
+        versionName = "v7.4"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
