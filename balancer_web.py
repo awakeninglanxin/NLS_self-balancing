@@ -979,6 +979,10 @@ canvas{display:block;margin:0 auto;border-radius:8px}
       <span style="font-size:9px;color:#ff6688;width:30px;text-align:right;flex-shrink:0">幻数</span>
       <div style="flex:1;height:7px;border-radius:3px;background:#222"><div id="barJEL" style="background:#ff6688;width:0%;height:100%;border-radius:3px;transition:width .4s,opacity .3s"></div></div>
     </div>
+    <div style="display:flex;align-items:center;gap:4px">
+      <span style="font-size:9px;color:#ff88cc;width:30px;text-align:right;flex-shrink:0">🎵</span>
+      <div style="flex:1;height:7px;border-radius:3px;background:#222"><div id="barMH" style="background:#ff88cc;width:0%;height:100%;border-radius:3px;transition:width .4s,opacity .3s"></div></div>
+    </div>
   </div>
 </div>
 <style>.algo-btn{padding:4px 7px;border-radius:8px;font-size:10px;cursor:pointer;background:#222;color:#888;border:0}.algo-btn.active{background:#7c4dff;color:#fff}.cmp-btn{background:#ff6600;color:#000;font-weight:bold}</style>
@@ -1327,7 +1331,7 @@ function poll(){
       // 突显当前算法bar
       barIds.forEach(function(id){document.getElementById(id).style.opacity='1'});
       if(curAlgoKey){
-        var curBarId={original:'barOrg',legacy:'barLeg',yinyang:'barYY',fusion:'barFus',schumann:'barSch'}[curAlgoKey];
+        var curBarId={original:'barOrg',legacy:'barLeg',yinyang:'barYY',fusion:'barFus',schumann:'barSch',water:'barH2O',jellium:'barJEL',multiharm:'barMH'}[curAlgoKey];
         if(curBarId) document.getElementById(curBarId).style.opacity='1';
       }
       document.getElementById('barOrg').style.width=(orgRate=='-'?0:Math.max(1,orgRate))+'%';
@@ -1335,6 +1339,9 @@ function poll(){
       document.getElementById('barYY').style.width=(yyRate=='-'?0:Math.max(1,yyRate))+'%';
       document.getElementById('barFus').style.width=(fusRate=='-'?0:Math.max(1,fusRate))+'%';
       document.getElementById('barSch').style.width=(schRate=='-'?0:Math.max(1,schRate))+'%';
+      document.getElementById('barH2O').style.width=(h2oRate=='-'?0:Math.max(1,h2oRate))+'%';
+      document.getElementById('barJEL').style.width=(jelRate=='-'?0:Math.max(1,jelRate))+'%';
+      document.getElementById('barMH').style.width=(mhRate=='-'?0:Math.max(1,mhRate))+'%';
     } else {
       barIds.forEach(function(id){var row=document.getElementById(id).parentNode.parentNode;row.style.display='none';});
       var cur=s.algo||'yinyang';
