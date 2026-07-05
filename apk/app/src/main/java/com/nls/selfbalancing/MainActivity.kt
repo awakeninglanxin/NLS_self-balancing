@@ -86,6 +86,18 @@ class MainActivity : AppCompatActivity() {
         progress = findViewById(R.id.progress)
         logContainer = findViewById(R.id.logContainer)
         tabHost = findViewById(R.id.tabHost)
+
+        // Treatment speed slider
+        val speedSlider = findViewById<SeekBar>(R.id.speedSlider)
+        val speedLabel = findViewById<TextView>(R.id.speedLabel)
+        speedSlider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(s: SeekBar, v: Int, fromUser: Boolean) {
+                engine.treatSpeed = (v + 1).toFloat()
+                speedLabel.text = "×${v + 1}"
+            }
+            override fun onStartTrackingTouch(s: SeekBar?) {}
+            override fun onStopTrackingTouch(s: SeekBar?) {}
+        })
     }
 
     private fun buildTabHost() {

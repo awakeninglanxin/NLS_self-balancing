@@ -182,6 +182,7 @@ class BalancerEngine(private val ctx: Context) {
     )
 
     var algoMode: String = "ab"  // legacy / yinyang / fusion / schumann / water / ab
+    var treatSpeed: Float = 1f  // 治疗时间周期倍数 1~12
     private var algoQueue = mutableListOf<String>()
     private var batchNum = 0
     private var baseline = mutableMapOf<Int, Double>()
@@ -283,9 +284,9 @@ class BalancerEngine(private val ctx: Context) {
                         }
                         val extra = if (lastTx.count > 1) " ×${lastTx.count}对" else ""
                         onLog?.invoke("  ${band.organ} Δ=${"%.1f".format(delta)} ${band.freqStr()} | ${lastTx.fmt()}$extra")
-                        delay(50)
+                        delay(treatMs(50))
                         // Verify after treatment
-                        Thread.sleep(50)
+                        Thread.sleep(treatMs(50))
                         val afterRaw = probe(band.b9)
                         val bl = baseline[band.b9] ?: 105.0
                         val afterDelta = afterRaw - bl
@@ -293,7 +294,7 @@ class BalancerEngine(private val ctx: Context) {
                         val stat = algoStats.getOrPut(useAlgo) { AlgoStat() }
                         stat.rounds++
                         if (diff > 0.5) stat.imp++ else if (diff < -0.5) stat.wors++
-                        delay(50)
+                        delay(treatMs(50))
                     }
                 } else { onLog?.invoke("  ✓ 全部频段平衡") }
                 round++
@@ -324,6 +325,9 @@ class BalancerEngine(private val ctx: Context) {
     }
 
     private fun Band.freqStr(): String = if (freqKhz >= 1000) "%.2fMHz".format(freqKhz / 1000.0) else "${freqKhz}kHz"
+
+    /** 治疗延时 = 基础毫秒 × treatSpeed倍数 */
+    private fun treatMs(ms: Long): Long = (ms * treatSpeed).toLong()
 
     private fun sendProbe(b9: Int, b11: Int, b15: Int, b13: Int = b9) {
         buf.fill(0)
@@ -488,7 +492,7 @@ class BalancerEngine(private val ctx: Context) {
             buf[13] = ch2b9.toByte(); buf[15] = ch2Amp.toByte()
             try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
             lastTx = TxInfo(ch1b9, ch1Amp, ch2b9, ch2Amp, 5)
-            if (i < 4) try { Thread.sleep(40) } catch (_: Exception) {}
+            if (i < 4) try { Thread.sleep(treatMs(40)) } catch (_: Exception) {}
         }
     }
 
