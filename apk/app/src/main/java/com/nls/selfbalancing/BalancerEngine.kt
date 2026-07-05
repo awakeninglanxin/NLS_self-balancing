@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.hardware.usb.*
+import android.os.Build
 import kotlinx.coroutines.*
 import kotlin.math.abs
 
@@ -44,7 +45,8 @@ class BalancerEngine(private val ctx: Context) {
 
     fun initialize() {
         if (!registered) {
-            ctx.registerReceiver(usbReceiver, IntentFilter(actionUsbPermission), Context.RECEIVER_NOT_EXPORTED)
+            val flags = if (Build.VERSION.SDK_INT >= 33) Context.RECEIVER_NOT_EXPORTED else 0
+            ctx.registerReceiver(usbReceiver, IntentFilter(actionUsbPermission), flags)
             registered = true
         }
     }
