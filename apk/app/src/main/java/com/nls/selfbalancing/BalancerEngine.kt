@@ -123,8 +123,8 @@ class BalancerEngine(private val ctx: Context) {
     data class ChartDelta(val b9: Int, val organ: String, val wuxing: String, val delta: Double)
     data class AlgoStat(var imp: Int = 0, var wors: Int = 0, var rounds: Int = 0)
     data class TxInfo(var ch1B9: Int = 0, var ch1Amp: Int = 0, var ch2B9: Int = 0, var ch2Amp: Int = 0, var count: Int = 1) {
-        val ch1FreqKhz: Double get() = 7372.8 * Math.pow(2.0, ch1B9 / 4.0) * 3
-        val ch2FreqKhz: Double get() = 7372.8 * Math.pow(2.0, ch2B9 / 4.0) * 3
+        val ch1FreqKhz: Double get() = 7372.8 / Math.pow(2.0, (ch1B9 - 14) / 2.0)
+        val ch2FreqKhz: Double get() = 7372.8 / Math.pow(2.0, (ch2B9 - 14) / 2.0)
         val freqDiffKhz: Double get() = Math.abs(ch1FreqKhz - ch2FreqKhz)
         fun fmt(): String {
             val ch1f = if (ch1FreqKhz >= 1000) "%.2fM".format(ch1FreqKhz / 1000) else "%.0fk".format(ch1FreqKhz)
@@ -135,6 +135,39 @@ class BalancerEngine(private val ctx: Context) {
         }
     }
     var lastTx = TxInfo()
+
+    /** Per-b9 CH1/CH2 振幅映射 — 来自双用户PCAP检测协议中位值
+     *  高频(MHz)高功率穿透, 中频(kHz生物共振)极低功率, 低频(ELF)低功率 */
+    private fun ch1Amp(b9: Int): Int = when (b9) {
+        14 -> 90; 15 -> 90; 16 -> 56; 17 -> 63; 18 -> 67; 19 -> 74
+        20 -> 80; 21 -> 80  // 低频大功率穿透
+        22 -> 3;  23 -> 3;  24 -> 3   // 中频极低功率(组织敏感)
+        25 -> 4;  26 -> 5;  27 -> 10
+        28 -> 15  // 参考频段
+        30 -> 9;  31 -> 9   // ELF低功率尾
+        else -> 15
+    }
+    /** CH2振幅=CH1振幅±偏移, |b11-b15|中位≈12 (匹配PCAP检测非对称特征) */
+    private fun ch2Amp(b9: Int): Int = when (b9) {
+        14 -> 78; 15 -> 78; 16 -> 44; 17 -> 51; 18 -> 55; 19 -> 62
+        20 -> 68; 21 -> 68
+        22 -> 3;  23 -> 3;  24 -> 3   // 极低功率区保持一致
+        25 -> 4;  26 -> 5;  27 -> 10
+        28 -> 15
+        30 -> 9;  31 -> 9
+        else -> 15
+    }
+
+    /** 疗愈模式振幅基底 — 来自丽梦儿PCAP疗愈中位值
+     *  比检测更对称(b11≈b15), b9=28使用最大功率172作载波 */
+    private fun cureBaseAmp(b9: Int): Int = when (b9) {
+        14 -> 90; 15 -> 88; 16 -> 55; 17 -> 62; 18 -> 66; 19 -> 74
+        20 -> 77; 21 -> 127
+        22 -> 3;  23 -> 3;  24 -> 26; 25 -> 20; 26 -> 21; 27 -> 22
+        28 -> 172  // 最大功率载波(PCAP疗愈48%命令用b9=28,b11=172)
+        30 -> 33; 31 -> 8
+        else -> 30
+    }
 
     private val bands = listOf(
         Band(14, "松果体/脑中枢", "火", 7373), Band(15, "下丘脑/内分泌", "火", 5213),
@@ -161,7 +194,7 @@ class BalancerEngine(private val ctx: Context) {
             try {
                 for (band in bands) {
                     val raw: Double = try {
-                        sendProbe(band.b9, 15, 15)
+                        sendPcapProbe(band.b9)
                         Thread.sleep(80)
                         // 可以加 IN 读取，暂用 probe 占位
                         val r = connection?.bulkTransfer(epOut, ByteArray(128), 128, 100) ?: 0
@@ -172,7 +205,7 @@ class BalancerEngine(private val ctx: Context) {
                     Thread.sleep(20)
                 }
                 isCalibrated = true
-                h.post { onLog?.invoke("✅ 校准完成: ${baseline.size}频段"); callback(true, "✅ 校准完成") }
+                h.post { onLog?.invoke("✅ 校准完成: ${baseline.size}频段 (PCAP振幅)"); callback(true, "✅ 校准完成") }
             } catch (e: Exception) {
                 h.post { callback(false, "校准失败: ${e.message}") }
             }
@@ -215,7 +248,7 @@ class BalancerEngine(private val ctx: Context) {
                 val deltas = mutableMapOf<Int, Double>()
                 for (i in bands.indices) {
                     if (!isPlaying) break
-                    sendProbe(bands[i].b9, 15, 15)
+                    sendPcapProbe(bands[i].b9)
                     delay(80)
                     val raw = 100.0 + Math.random() * 10 - 5
                     val bl = baseline[bands[i].b9] ?: 105.0
@@ -291,16 +324,19 @@ class BalancerEngine(private val ctx: Context) {
 
     private fun Band.freqStr(): String = if (freqKhz >= 1000) "%.2fMHz".format(freqKhz / 1000.0) else "${freqKhz}kHz"
 
-    private fun sendProbe(b9: Int, b11: Int, b15: Int) {
+    private fun sendProbe(b9: Int, b11: Int, b15: Int, b13: Int = b9) {
         buf.fill(0)
         buf[9] = b9.toByte(); buf[11] = b11.toByte()
-        buf[13] = b9.toByte(); buf[15] = b15.toByte()
+        buf[13] = b13.toByte(); buf[15] = b15.toByte()
         try { connection?.bulkTransfer(epOut, buf, buf.size, 1000) } catch (_: Exception) {}
     }
 
+    /** 使用PCAP振幅映射发送探针(检测模式: CH1≠CH2振幅) */
+    private fun sendPcapProbe(b9: Int) = sendProbe(b9, ch1Amp(b9), ch2Amp(b9), b9)
+
     /** USB探测: 发送命令并读取256字节响应 */
     private fun probe(b9: Int): Double {
-        sendProbe(b9, 15, 15)
+        sendPcapProbe(b9)
         try { Thread.sleep(80) } catch (_: Exception) {}
         return 100.0 + (Math.random() * 10 - 5)
     }
@@ -311,10 +347,11 @@ class BalancerEngine(private val ctx: Context) {
 
     // ── Algorithms ──
 
-    // ── ② Legacy: 异频反相 — CH1≠CH2, 反相振幅, beat=|f1-f2|增加有效调制深度 ──
+    // ── ② Legacy: 异频反相 — CH1≠CH2, 反相振幅(基于PCAP疗愈基底) ──
     private fun treatLegacy(b9: Int, delta: Double, adjust: Int) {
-        val b11 = if (delta > 0) (15 - adjust).coerceIn(3, 80) else (15 + adjust).coerceIn(3, 80)
-        val b15 = if (delta > 0) (15 + adjust).coerceIn(3, 80) else (15 - adjust).coerceIn(3, 80)
+        val base = cureBaseAmp(b9)
+        val b11 = if (delta > 0) (base - adjust).coerceIn(3, 172) else (base + adjust).coerceIn(3, 172)
+        val b15 = if (delta > 0) (base + adjust).coerceIn(3, 172) else (base - adjust).coerceIn(3, 172)
         val offset = (abs(delta) / 4).toInt().coerceIn(1, 3)
         val ch2b9 = if (delta > 0) (b9 + offset).coerceIn(14, 31) else (b9 - offset).coerceIn(14, 31)
         buf.fill(0); buf[9] = b9.toByte(); buf[11] = b11.toByte()
@@ -334,12 +371,13 @@ class BalancerEngine(private val ctx: Context) {
     }
 
     private fun treatYinyang(b9: Int, delta: Double, adjust: Int) {
+        val base = cureBaseAmp(b9)
         val (wS, wM) = yinyangW(b9)
         val sB9 = nearest(b9, SUN_SEQ); val mB9 = nearest(b9, MOON_SEQ)
-        val a1 = if (delta > 0) (15.0 - adjust * wS).toInt().coerceIn(3, 80)
-                 else (15.0 + adjust * wS).toInt().coerceIn(3, 80)
-        val a2 = if (delta > 0) (15.0 + adjust * wM).toInt().coerceIn(3, 80)
-                 else (15.0 - adjust * wM).toInt().coerceIn(3, 80)
+        val a1 = if (delta > 0) (base - adjust * wS).toInt().coerceIn(3, 172)
+                 else (base + adjust * wS).toInt().coerceIn(3, 172)
+        val a2 = if (delta > 0) (base + adjust * wM).toInt().coerceIn(3, 172)
+                 else (base - adjust * wM).toInt().coerceIn(3, 172)
         buf.fill(0); buf[9] = sB9.toByte(); buf[11] = a1.toByte()
         buf[13] = mB9.toByte(); buf[15] = a2.toByte()
         try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
@@ -347,8 +385,9 @@ class BalancerEngine(private val ctx: Context) {
     }
 
     private fun treatFusion(b9: Int, delta: Double, adjust: Int) {
-        val b11 = if (delta > 0) (15 - adjust).coerceIn(3, 80) else (15 + adjust).coerceIn(3, 80)
-        val b15 = if (delta > 0) (15 + adjust).coerceIn(3, 80) else (15 - adjust).coerceIn(3, 80)
+        val base = cureBaseAmp(b9)
+        val b11 = if (delta > 0) (base - adjust).coerceIn(3, 172) else (base + adjust).coerceIn(3, 172)
+        val b15 = if (delta > 0) (base + adjust).coerceIn(3, 172) else (base - adjust).coerceIn(3, 172)
         val s = nearest(b9, SUN_SEQ); val m = nearest(b9, MOON_SEQ)
         val c1 = b9.coerceIn(s - 2, s + 2); val c2 = b9.coerceIn(m - 2, m + 2)
         buf.fill(0); buf[9] = c1.toByte(); buf[11] = b11.toByte()
@@ -358,13 +397,14 @@ class BalancerEngine(private val ctx: Context) {
     }
 
     private fun treatSchumann(b9: Int, delta: Double, adjust: Int) {
+        val base = cureBaseAmp(b9)
         val sIdx = (abs(delta) / 5).toInt().coerceAtMost(4)
         val schB9 = (b9 - 6).coerceIn(14, 31)
         val ch2B9 = (schB9 + sIdx + 1).coerceIn(14, 31)
-        buf.fill(0); buf[9] = schB9.toByte(); buf[11] = 15.toByte()
-        buf[13] = ch2B9.toByte(); buf[15] = 15.toByte()
+        buf.fill(0); buf[9] = schB9.toByte(); buf[11] = base.toByte()
+        buf[13] = ch2B9.toByte(); buf[15] = base.toByte()
         try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
-        lastTx = TxInfo(schB9, 15, ch2B9, 15)
+        lastTx = TxInfo(schB9, base, ch2B9, base)
     }
 
     private val WATER_MODES = doubleArrayOf(2.04, 3.42, 4.83, 7.78, 10.84, 13.94, 16.97, 19.56,
@@ -372,11 +412,11 @@ class BalancerEngine(private val ctx: Context) {
 
     // ── ⑥ Water: 异频水共振 — CH2=水团簇频率索引偏移, 振幅反相 ──
     private fun treatWater(b9: Int, delta: Double, adjust: Int) {
+        val base = cureBaseAmp(b9)
         val wIdx = ((b9 - 14) * WATER_MODES.size / 18).coerceIn(0, WATER_MODES.size - 1)
         val waterHz = WATER_MODES[wIdx]
-        val b11 = if (delta > 0) (15 - adjust).coerceIn(3, 80) else (15 + adjust).coerceIn(3, 80)
-        val b15 = if (delta > 0) (15 + adjust).coerceIn(3, 80) else (15 - adjust).coerceIn(3, 80)
-        // CH2 频率按水模式偏移
+        val b11 = if (delta > 0) (base - adjust).coerceIn(3, 172) else (base + adjust).coerceIn(3, 172)
+        val b15 = if (delta > 0) (base + adjust).coerceIn(3, 172) else (base - adjust).coerceIn(3, 172)
         val ch2offset = if (waterHz < 50) 2 else if (waterHz < 200) 1 else -1
         val ch2b9 = (b9 + ch2offset).coerceIn(14, 31)
         buf.fill(0); buf[9] = b9.toByte(); buf[11] = b11.toByte()
@@ -385,12 +425,13 @@ class BalancerEngine(private val ctx: Context) {
         lastTx = TxInfo(b9, b11, ch2b9, b15)
     }
 
-    // ── ⑥ Original: PCAP逆推原版逼近 (同频54%+异频46%, 振幅边界复刻) ──
+    // ── ⑥ Original: PCAP逆推原版逼近 (54%同频+46%异频, 疗愈基底振幅) ──
     private fun treatOriginal(b9: Int, delta: Double, adjust: Int) {
+        val base = cureBaseAmp(b9)
         val samePct = 54
         val isSame = (abs(b9.hashCode()) % 100) < samePct
-        val b11 = if (delta > 0) maxOf(3, 15 - adjust) else minOf(80, 15 + adjust)
-        val b15 = if (delta > 0) minOf(80, 15 + adjust) else maxOf(3, 15 - adjust)
+        val b11 = if (delta > 0) maxOf(3, base - adjust) else minOf(172, base + adjust)
+        val b15 = if (delta > 0) minOf(172, base + adjust) else maxOf(3, base - adjust)
         if (isSame) {
             sendProbe(b9, b11, b15)
             lastTx = TxInfo(b9, b11, b9, b15)
@@ -398,9 +439,9 @@ class BalancerEngine(private val ctx: Context) {
             val offset = abs((b9 * 7 + delta.toInt()).hashCode()) % 15 + 1
             val ch2b9 = minOf(31, b9 + offset)
             buf.fill(0); buf[9] = b9.toByte(); buf[11] = b11.toByte()
-            buf[13] = ch2b9.toByte(); buf[15] = (b15 / 2).toByte()
+            buf[13] = ch2b9.toByte(); buf[15] = minOf(172, b15).toByte()
             try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
-            lastTx = TxInfo(b9, b11, ch2b9, b15 / 2)
+            lastTx = TxInfo(b9, b11, ch2b9, minOf(172, b15))
         }
     }
 
@@ -409,12 +450,13 @@ class BalancerEngine(private val ctx: Context) {
     private val JELLIUM_AMP = doubleArrayOf(0.25, 0.40, 0.60, 0.85, 1.15, 1.50, 0.80, 1.85, 2.20, 2.60, 3.00, 0.60)
 
     private fun treatJellium(b9: Int, delta: Double, adjust: Int) {
+        val base = cureBaseAmp(b9)
         val tier = (abs(delta) / 10).toInt().coerceIn(0, JELLIUM_SEQ.size - 1)
         val shellNum = JELLIUM_SEQ[tier]
         val ampBoost = JELLIUM_AMP[tier]
         val adj = minOf(60, (abs(delta) * ampBoost).toInt())
-        val b11 = maxOf(3, 15 - adj)
-        val b15 = minOf(80, 15 + adj)
+        val b11 = maxOf(3, base - adj)
+        val b15 = minOf(172, base + adj)
         val ch2b9 = if (shellNum % 2 == 0) b9 else minOf(31, b9 + (shellNum % 5) + 1)
         buf.fill(0); buf[9] = b9.toByte(); buf[11] = b11.toByte()
         buf[13] = ch2b9.toByte(); buf[15] = b15.toByte()
@@ -428,17 +470,18 @@ class BalancerEngine(private val ctx: Context) {
     // CH1频率偏移: [0, +1, -2, +3, -1]  — 无理化间隔
     // CH2频率偏移: [0, -1, +2, -3, +1]  — 反向偏移, 差频两两无理
     private fun treatMultiHarmonic(b9: Int, delta: Double, adjust: Int) {
+        val base = cureBaseAmp(b9)
         val ch1Offsets = intArrayOf(0, 1, -2, 3, -1)
         val ch2Offsets = intArrayOf(0, -1, 2, -3, 1)
         val ampFactors = doubleArrayOf(1.0, 0.80, 0.65, 0.50, 0.35)
-        val b11Base = if (delta > 0) maxOf(3, 15 - adjust) else minOf(80, 15 + adjust)
-        val b15Base = if (delta > 0) minOf(80, 15 + adjust) else maxOf(3, 15 - adjust)
+        val b11Base = if (delta > 0) maxOf(3, base - adjust) else minOf(172, base + adjust)
+        val b15Base = if (delta > 0) minOf(172, base + adjust) else maxOf(3, base - adjust)
 
         for (i in 0 until 5) {
             val ch1b9 = (b9 + ch1Offsets[i]).coerceIn(14, 31)
             val ch2b9 = (b9 + ch2Offsets[i]).coerceIn(14, 31)
-            val ch1Amp = (b11Base * ampFactors[i]).toInt().coerceIn(3, 80)
-            val ch2Amp = (b15Base * ampFactors[i]).toInt().coerceIn(3, 80)
+            val ch1Amp = (b11Base * ampFactors[i]).toInt().coerceIn(3, 172)
+            val ch2Amp = (b15Base * ampFactors[i]).toInt().coerceIn(3, 172)
             buf.fill(0)
             buf[9] = ch1b9.toByte(); buf[11] = ch1Amp.toByte()
             buf[13] = ch2b9.toByte(); buf[15] = ch2Amp.toByte()
