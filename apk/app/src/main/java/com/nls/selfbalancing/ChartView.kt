@@ -209,7 +209,7 @@ class ChartView @JvmOverloads constructor(
                 val fullW = (w - 200f).coerceAtLeast(1f)
 
                 // Label
-                paint.color = Color.parseColor("#aaa"); paint.textSize = 22f
+                paint.color = Color.parseColor("#aaaaaa"); paint.textSize = 22f
                 paint.textAlign = Paint.Align.LEFT
                 canvas.drawText("${d.name}", 10f, y + barH / 2 + 7f, paint)
 
