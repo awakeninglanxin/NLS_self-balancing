@@ -180,11 +180,12 @@ class BalancerEngine(private val ctx: Context) {
                 val useAlgo = if (algoMode == "ab") {
                     if (algoQueue.isEmpty()) {
                         batchNum++
-                        algoQueue = mutableListOf("original", "legacy", "yinyang", "fusion", "schumann", "water", "jellium")
+                        algoQueue = mutableListOf("original", "legacy", "yinyang", "fusion", "schumann", "water", "jellium", "multiharm")
                         algoQueue.shuffle()
                         val labels = algoQueue.joinToString(" → ") {
                             mapOf("original" to "🔗原版", "legacy" to "同频", "yinyang" to "☀☽",
-                                "fusion" to "融合", "schumann" to "舒曼", "water" to "水共振", "jellium" to "⚛幻数").getOrDefault(it, it)
+                                "fusion" to "融合", "schumann" to "舒曼", "water" to "水共振", "jellium" to "⚛幻数",
+                                "multiharm" to "🎵多谐波").getOrDefault(it, it)
                         }
                         onLog?.invoke("─── 第${batchNum}遍: $labels ───")
                     }
@@ -192,7 +193,8 @@ class BalancerEngine(private val ctx: Context) {
                 } else algoMode
 
                 val label = mapOf("original" to "🔗原版", "legacy" to "同频反相", "yinyang" to "☀☽双频",
-                    "fusion" to "⚡融合", "schumann" to "🌍舒曼锚", "water" to "💧水共振", "jellium" to "⚛幻数")
+                    "fusion" to "⚡融合", "schumann" to "🌍舒曼锚", "water" to "💧水共振", "jellium" to "⚛幻数",
+                    "multiharm" to "🎵多谐波")
                     .getOrDefault(useAlgo, useAlgo)
                 onLog?.invoke("第${round}轮 — 扫描中… [$label]")
                 onStatus?.invoke(label)
@@ -229,6 +231,7 @@ class BalancerEngine(private val ctx: Context) {
                             "schumann" -> treatSchumann(band.b9, delta, adjust)
                             "water" -> treatWater(band.b9, delta, adjust)
                             "jellium" -> treatJellium(band.b9, delta, adjust)
+                            "multiharm" -> treatMultiHarmonic(band.b9, delta, adjust)
                             else -> treatLegacy(band.b9, delta, adjust)
                         }
                         onLog?.invoke("  ${band.organ} Δ=${"%.1f".format(delta)} ${band.freqStr()}")
@@ -259,7 +262,8 @@ class BalancerEngine(private val ctx: Context) {
                         val total = st.imp + st.wors
                         val rate = if (total > 0) "${(st.imp * 100 / total).toInt()}%" else "--"
                         val name = mapOf("original" to "🔗原版", "legacy" to "同频", "yinyang" to "☀☽",
-                            "fusion" to "融合", "schumann" to "舒曼", "water" to "水共振", "jellium" to "⚛幻数")[algo] ?: algo
+                            "fusion" to "融合", "schumann" to "舒曼", "water" to "水共振", "jellium" to "⚛幻数",
+                            "multiharm" to "🎵多谐波")[algo] ?: algo
                         parts.add("$name $rate")
                     }
                     onLog?.invoke("════ 第${prevBatch}遍七维对比: ${parts.joinToString(" │ ")} ════")
@@ -385,6 +389,31 @@ class BalancerEngine(private val ctx: Context) {
         buf.fill(0); buf[9] = b9.toByte(); buf[11] = b11.toByte()
         buf[13] = ch2b9.toByte(); buf[15] = b15.toByte()
         try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
+    }
+
+    // ── ⑧ MultiHarmonic: 多谐波无理数比扫掠 (CH1→φ偏移, CH2→√2偏移, 5对/器官) ──
+    // 原理: 两路独立可调频率, 每路5层谐波, 10对组合产生密集频谱
+    // 振幅: 中心100% → 外围逐层衰减 (100%, 80%, 65%, 50%, 35%)
+    // CH1频率偏移: [0, +1, -2, +3, -1]  — 无理化间隔
+    // CH2频率偏移: [0, -1, +2, -3, +1]  — 反向偏移, 差频两两无理
+    private fun treatMultiHarmonic(b9: Int, delta: Double, adjust: Int) {
+        val ch1Offsets = intArrayOf(0, 1, -2, 3, -1)
+        val ch2Offsets = intArrayOf(0, -1, 2, -3, 1)
+        val ampFactors = doubleArrayOf(1.0, 0.80, 0.65, 0.50, 0.35)
+        val b11Base = if (delta > 0) maxOf(3, 15 - adjust) else minOf(80, 15 + adjust)
+        val b15Base = if (delta > 0) minOf(80, 15 + adjust) else maxOf(3, 15 - adjust)
+
+        for (i in 0 until 5) {
+            val ch1b9 = (b9 + ch1Offsets[i]).coerceIn(14, 31)
+            val ch2b9 = (b9 + ch2Offsets[i]).coerceIn(14, 31)
+            val ch1Amp = (b11Base * ampFactors[i]).toInt().coerceIn(3, 80)
+            val ch2Amp = (b15Base * ampFactors[i]).toInt().coerceIn(3, 80)
+            buf.fill(0)
+            buf[9] = ch1b9.toByte(); buf[11] = ch1Amp.toByte()
+            buf[13] = ch2b9.toByte(); buf[15] = ch2Amp.toByte()
+            try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
+            if (i < 4) try { Thread.sleep(40) } catch (_: Exception) {}
+        }
     }
 
     fun stop() {
