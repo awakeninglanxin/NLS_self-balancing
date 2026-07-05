@@ -20,6 +20,7 @@ class MainActivity : AppCompatActivity() {
     private var chartView: ChartView? = null
     private var tabRadar: TextView? = null
     private var tabRidge: TextView? = null
+    private var tabCompare: TextView? = null
 
     private lateinit var statusDot: View
     private lateinit var statusText: TextView
@@ -98,10 +99,12 @@ class MainActivity : AppCompatActivity() {
                 setOnClickListener { onClick() }
             }
         }
-        tabRadar = makeTab("☯ 五行雷达") { switchTab(ChartView.Mode.RADAR) }
-        tabRidge = makeTab("📈 频谱脊线") { switchTab(ChartView.Mode.RIDGE) }
+        tabRadar = makeTab("☯ 五行") { switchTab(ChartView.Mode.RADAR) }
+        tabRidge = makeTab("📈 脊线") { switchTab(ChartView.Mode.RIDGE) }
+        tabCompare = makeTab("⚖ 对比") { switchTab(ChartView.Mode.ALGO_COMPARE) }
         tabRow.addView(tabRadar)
         tabRow.addView(tabRidge)
+        tabRow.addView(tabCompare)
 
         // Chart area
         val chartFrame = FrameLayout(ctx).apply {
@@ -125,6 +128,7 @@ class MainActivity : AppCompatActivity() {
         val active = 0xFF00e5a0.toInt(); val inactive = 0xFF888888.toInt()
         tabRadar?.setTextColor(if (mode == ChartView.Mode.RADAR) active else inactive)
         tabRidge?.setTextColor(if (mode == ChartView.Mode.RIDGE) active else inactive)
+        tabCompare?.setTextColor(if (mode == ChartView.Mode.ALGO_COMPARE) active else inactive)
     }
 
     private fun setupCallbacks() {
@@ -139,6 +143,19 @@ class MainActivity : AppCompatActivity() {
                 chartView?.let { cv ->
                     cv.deltaData = deltas.map { ChartView.BandDelta(it.b9, it.organ, it.wuxing, it.delta) }
                     cv.wuxingData = wuxing
+                    cv.invalidate()
+                }
+            }
+        }
+        engine.onBatchReport = { batchNum, stats ->
+            mainHandler.post {
+                val bars = stats.map { (key, s) ->
+                    val name = mapOf("original" to "🔗原版", "legacy" to "同频反相", "yinyang" to "☀☽双频",
+                        "fusion" to "⚡融合", "schumann" to "🌍舒曼锚", "water" to "💧水共振", "jellium" to "⚛幻数")[key] ?: key
+                    ChartView.AlgoBar(key, name, s.imp, s.wors)
+                }.sortedByDescending { val t = it.imp + it.wors; if (t > 0) it.imp.toDouble() / t else 0.0 }
+                chartView?.let { cv ->
+                    cv.algoCompareData = bars
                     cv.invalidate()
                 }
             }

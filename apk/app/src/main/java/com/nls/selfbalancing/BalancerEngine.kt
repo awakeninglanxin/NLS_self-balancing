@@ -28,6 +28,7 @@ class BalancerEngine(private val ctx: Context) {
     var onRound: ((Int) -> Unit)? = null
     var onLog: ((String) -> Unit)? = null
     var onChart: ((deltas: List<ChartDelta>, wuxing: Map<String, Double>) -> Unit)? = null
+    var onBatchReport: ((batchNum: Int, stats: Map<String, AlgoStat>) -> Unit)? = null
     var isPlaying = false; private set
     var isConnected = false; private set
     var isCalibrated = false; private set
@@ -120,6 +121,7 @@ class BalancerEngine(private val ctx: Context) {
     /** 18频段 b9=14~31 分频器模型: f=7.3728/2^((b9-14)/2), 20kHz~7.37MHz */
     data class Band(val b9: Int, val organ: String, val wuxing: String, val freqKhz: Int)
     data class ChartDelta(val b9: Int, val organ: String, val wuxing: String, val delta: Double)
+    data class AlgoStat(var imp: Int = 0, var wors: Int = 0, var rounds: Int = 0)
 
     private val bands = listOf(
         Band(14, "松果体/脑中枢", "火", 7373), Band(15, "下丘脑/内分泌", "火", 5213),
@@ -137,6 +139,7 @@ class BalancerEngine(private val ctx: Context) {
     private var algoQueue = mutableListOf<String>()
     private var batchNum = 0
     private var baseline = mutableMapOf<Int, Double>()
+    private val algoStats = mutableMapOf<String, AlgoStat>()
 
     fun calibrate(callback: (Boolean, String) -> Unit) {
         if (!isConnected) { callback(false, "⚠ 请先连接手环"); return }
@@ -229,10 +232,38 @@ class BalancerEngine(private val ctx: Context) {
                             else -> treatLegacy(band.b9, delta, adjust)
                         }
                         onLog?.invoke("  ${band.organ} Δ=${"%.1f".format(delta)} ${band.freqStr()}")
-                        delay(100)
+                        delay(50)
+                        // Verify after treatment
+                        Thread.sleep(50)
+                        val afterRaw = probe(band.b9)
+                        val bl = baseline[band.b9] ?: 105.0
+                        val afterDelta = afterRaw - bl
+                        val diff = abs(delta) - abs(afterDelta)
+                        val stat = algoStats.getOrPut(useAlgo) { AlgoStat() }
+                        stat.rounds++
+                        if (diff > 0.5) stat.imp++ else if (diff < -0.5) stat.wors++
+                        delay(50)
                     }
                 } else { onLog?.invoke("  ✓ 全部频段平衡") }
                 round++
+
+                // Batch report: after every 7 rounds
+                if (round % 7 == 1 && round > 1) {
+                    val prevBatch = batchNum
+                    val report = algoStats.toMap()
+                    onBatchReport?.invoke(prevBatch, report)
+                    // Log summary
+                    val parts = mutableListOf<String>()
+                    for ((algo, st) in report) {
+                        val total = st.imp + st.wors
+                        val rate = if (total > 0) "%.0f%%".format(st.imp * 100.0 / total) else "--"
+                        val name = mapOf("original" to "🔗原版", "legacy" to "同频", "yinyang" to "☀☽",
+                            "fusion" to "融合", "schumann" to "舒曼", "water" to "水共振", "jellium" to "⚛幻数")[algo] ?: algo
+                        parts.add("$name $rate")
+                    }
+                    onLog?.invoke("════ 第${prevBatch}遍七维对比: ${parts.joinToString(" │ ")} ════")
+                }
+
                 onProgress?.invoke(bands.size, bands.size)
                 delay(3000)
             }
