@@ -28,7 +28,7 @@ class ChartView @JvmOverloads constructor(
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val bgPaint = Paint().apply { color = Color.parseColor("#0d0d1a") }
     private val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#222233"); strokeWidth = 1f; style = Paint.Style.STROKE
+        color = Color.parseColor("#ffffff33"); strokeWidth = 1.5f; style = Paint.Style.STROKE
     }
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#555555"); textSize = 24f; textAlign = Paint.Align.CENTER
