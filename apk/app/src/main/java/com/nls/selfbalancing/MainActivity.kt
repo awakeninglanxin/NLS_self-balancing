@@ -218,20 +218,24 @@ class MainActivity : AppCompatActivity() {
 
     private fun onExport() {
         try {
+            // Wait for any pending UI log updates to flush
+            Thread.sleep(200)
             val sdf = SimpleDateFormat("yyyy-MM-dd_HH-mm", Locale.getDefault())
             val filename = "NLS_Balance_${sdf.format(Date())}.txt"
             val dir = getExternalFilesDir(null) ?: filesDir
             val file = File(dir, filename)
+            val lines = logHistory.toList()  // snapshot
             PrintWriter(file).use { pw ->
-                pw.println("NLS 动态平衡仪 — 日志导出")
+                pw.println("NLS 动态平衡仪 — 完整日志导出")
                 pw.println("时间: ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())}")
+                pw.println("记录数: ${lines.size} 条")
                 pw.println("=" .repeat(40))
-                for (line in logHistory) pw.println(line)
+                for (line in lines) pw.println(line)
                 pw.println("=" .repeat(40))
                 pw.println("文件路径: $file")
             }
-            addLog("💾 已导出: $filename")
-            Toast.makeText(this, "已保存: $file", Toast.LENGTH_LONG).show()
+            addLog("💾 已导出: $filename (${lines.size}条记录)")
+            Toast.makeText(this, "已保存 ${lines.size} 条: $filename", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
             addLog("导出失败: ${e.message}")
         }
