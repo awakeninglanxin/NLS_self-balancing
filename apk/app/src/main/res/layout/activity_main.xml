@@ -125,19 +125,22 @@
 
         <TextView android:id="@+id/tabRadar" android:text="☯ 五行"
             android:textColor="#00e5a0" android:textSize="12sp"
-            android:padding="6dp 12dp" android:background="#112222"
+            android:paddingHorizontal="12dp" android:paddingVertical="6dp"
+            android:background="#112222"
             android:clickable="true" android:focusable="true"
             android:layout_marginEnd="2dp" />
 
         <TextView android:id="@+id/tabBands" android:text="📊 偏差"
             android:textColor="#888" android:textSize="12sp"
-            android:padding="6dp 12dp" android:background="#111122"
+            android:paddingHorizontal="12dp" android:paddingVertical="6dp"
+            android:background="#111122"
             android:clickable="true" android:focusable="true"
             android:layout_marginEnd="2dp" />
 
         <TextView android:id="@+id/tabRidge" android:text="📈 脊线"
             android:textColor="#888" android:textSize="12sp"
-            android:padding="6dp 12dp" android:background="#111122"
+            android:paddingHorizontal="12dp" android:paddingVertical="6dp"
+            android:background="#111122"
             android:clickable="true" android:focusable="true" />
     </LinearLayout>
 
