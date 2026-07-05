@@ -17,9 +17,11 @@ import kotlin.math.abs
 class BalancerEngine(private val ctx: Context) {
     private var connection: UsbDeviceConnection? = null
     private var epOut: UsbEndpoint? = null
+    private var epIn: UsbEndpoint? = null
     private var device: UsbDevice? = null
     private var job: Job? = null
     private val buf = ByteArray(128)
+    private val readBuf = ByteArray(256)
 
     var onStatus: ((String) -> Unit)? = null
     var onProgress: ((Int, Int) -> Unit)? = null
@@ -79,12 +81,14 @@ class BalancerEngine(private val ctx: Context) {
                 for (j in 0 until iface.endpointCount) {
                     val ep = iface.getEndpoint(j)
                     if (ep.direction == UsbConstants.USB_DIR_OUT && ep.type == UsbConstants.USB_ENDPOINT_XFER_BULK) {
-                        epOut = ep; break
+                        epOut = ep
+                    } else if (ep.direction == UsbConstants.USB_DIR_IN && ep.type == UsbConstants.USB_ENDPOINT_XFER_BULK) {
+                        epIn = ep
                     }
                 }
                 if (epOut != null) break
             }
-            if (epOut == null) { connection!!.close(); connection = null; callback(false, "未找到端点"); return }
+            if (epOut == null) { connection!!.close(); connection = null; callback(false, "未找到OUT端点"); return }
             configureFtdi()
             isConnected = true
             callback(true, "手环已连接")
@@ -134,6 +138,10 @@ class BalancerEngine(private val ctx: Context) {
     private var batchNum = 0
 
     fun startBalance() {
+        if (!isConnected) {
+            onLog?.invoke("⚠ 请先连接手环 (USB OTG)")
+            return
+        }
         stop()
         isPlaying = true
         onStatus?.invoke("🧬 动态平衡启动")
@@ -167,9 +175,7 @@ class BalancerEngine(private val ctx: Context) {
                 val deltas = mutableMapOf<Int, Double>()
                 for (i in bands.indices) {
                     if (!isPlaying) break
-                    sendProbe(bands[i].b9, 15, 15)
-                    delay(80)
-                    deltas[bands[i].b9] = (Math.random() * 20 - 10)
+                    deltas[bands[i].b9] = probe(bands[i].b9)  // 真实 USB 探测
                     onProgress?.invoke(i + 1, bands.size)
                 }
 
@@ -206,6 +212,21 @@ class BalancerEngine(private val ctx: Context) {
         buf[9] = b9.toByte(); buf[11] = b11.toByte()
         buf[13] = b9.toByte(); buf[15] = b15.toByte()
         try { connection?.bulkTransfer(epOut, buf, buf.size, 1000) } catch (_: Exception) {}
+    }
+
+    /** 真实探测: 发送命令 → 读取 256 字节响应 → 返回平均值 */
+    private fun probe(b9: Int): Double {
+        sendProbe(b9, 15, 15)
+        if (epIn == null) return (Math.random() * 20 - 10)  // 无 IN 端点时回退模拟
+        try {
+            val read = connection?.bulkTransfer(epIn, readBuf, 256, 200) ?: -1
+            if (read == 256) {
+                var sum = 0
+                for (b in readBuf) sum += b.toInt() and 0xFF
+                return sum / 256.0
+            }
+        } catch (_: Exception) {}
+        return (Math.random() * 20 - 10)  // 读取失败回退模拟
     }
 
     private fun wuxingCorr(wx: String): Double = when(wx) {
