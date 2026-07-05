@@ -144,10 +144,9 @@
             android:clickable="true" android:focusable="true" />
     </LinearLayout>
 
-    <!-- Main chart area -->
-    <view
-        android:id="@+id/chartView"
-        class="com.nls.selfbalancing.ChartView"
+    <!-- Main chart area (created in code, avoids XML inflation crash) -->
+    <FrameLayout
+        android:id="@+id/chartContainer"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="4"

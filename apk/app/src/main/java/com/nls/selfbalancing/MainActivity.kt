@@ -76,7 +76,10 @@ class MainActivity : AppCompatActivity() {
         algoText = findViewById(R.id.algoText)
         progress = findViewById(R.id.progress)
         logContainer = findViewById(R.id.logContainer)
-        chartView = findViewById(R.id.chartView)
+        chartView = ChartView(this)
+        val chartContainer = findViewById<FrameLayout>(R.id.chartContainer)
+        chartContainer.addView(chartView, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         tabRadar = findViewById(R.id.tabRadar)
         tabBands = findViewById(R.id.tabBands)
         tabRidge = findViewById(R.id.tabRidge)
