@@ -6,7 +6,11 @@ import android.util.AttributeSet
 import android.view.View
 import kotlin.math.*
 
-class ChartView(context: Context, attrs: AttributeSet?) : View(context, attrs) {
+class ChartView @JvmOverloads constructor(
+    context: Context,
+    attrs: AttributeSet? = null,
+    defStyleAttr: Int = 0
+) : View(context, attrs, defStyleAttr) {
     enum class Mode { RADAR, BANDS, RIDGE }
     var mode = Mode.RADAR
 
