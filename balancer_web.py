@@ -1086,8 +1086,9 @@ function drawRadar(items){
     ctx.fillStyle=colors[i];ctx.font='bold 26px system-ui';ctx.textAlign='center';
     ctx.fillText(names[i],cx+(radius+28)*Math.cos(a),cy+(radius+28)*Math.sin(a)+9);
   }
-  // Data polygon (green, matching phone)
-  ctx.beginPath();ctx.strokeStyle='#00ff88';ctx.lineWidth=2;
+  // Data polygon (green pentagon, matching phone v7.25)
+  ctx.beginPath();ctx.strokeStyle='#00ff88';ctx.lineWidth=3;
+  ctx.fillStyle='rgba(68,255,136,0.28)';
   var hasData=false;
   for(var i=0;i<n;i++){
     var a=-Math.PI/2+2*Math.PI*i/n,v=vals[i];
@@ -1095,14 +1096,14 @@ function drawRadar(items){
     if(Math.abs(v)>0.01)hasData=true;
     i==0?ctx.moveTo(cx+rr*Math.cos(a),cy+rr*Math.sin(a)):ctx.lineTo(cx+rr*Math.cos(a),cy+rr*Math.sin(a));
   }
-  ctx.closePath();ctx.fillStyle='rgba(0,255,136,0.25)';ctx.fill();ctx.stroke();
-  // Dots
+  ctx.closePath();ctx.fill();ctx.stroke();
+  // Vertex dots (larger, matching phone)
   for(var i=0;i<n;i++){
     var a=-Math.PI/2+2*Math.PI*i/n,v=vals[i];
     var rr=radius*Math.abs(v)/mx;if(v<0)rr=-rr;
-    ctx.beginPath();ctx.arc(cx+rr*Math.cos(a),cy+rr*Math.sin(a),5,0,Math.PI*2);
+    ctx.beginPath();ctx.arc(cx+rr*Math.cos(a),cy+rr*Math.sin(a),6,0,Math.PI*2);
     ctx.fillStyle=v>0?'#ff4444':v<0?'#4488ff':'#888';ctx.fill();
-    ctx.strokeStyle='#fff';ctx.lineWidth=1;ctx.stroke();
+    ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();
   }
   // Radar text summary
   var maxWX='',maxV=0,summaries=[];
