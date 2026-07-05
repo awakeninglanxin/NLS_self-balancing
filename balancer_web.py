@@ -1429,9 +1429,9 @@ function poll(){
       try{drawRadar(items)}catch(e){debug('雷达图错误:'+e.message)}
     }
 
-    // List (always visible in its tab)
+    // Deltas list (hidden, used for data, was previously visible in list tab)
     var dl=document.getElementById('deltas');
-    if(items.length>0){
+    if(dl && items.length>0){
       var h='';
       for(var i=0;i<items.length;i++){
         var o=items[i],ad=Math.abs(o.delta),c=ad>8?'#ff4444':ad>4?'#ffaa00':'#00ff88';
