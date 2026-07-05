@@ -494,30 +494,30 @@ class BalancerEngine(private val ctx: Context) {
 
     // ── ⑨ 五音: 宫商角徵羽→五行→b9异频双通道 (√2频率比, PCAP振幅) ──
     // 原理: b9步进1对应频率比√2≈1.414(近纯五度), 双通道差拍产生五行调谐干涉
+    data class WuyinNote(val label: String, val ch1b9: Int, val ch2b9: Int, val wx: String)
     private val WUYIN_SEQ = listOf(
-        // label, ch1b9, ch2b9, wx, phaseMs
-        Triple("宫(土)", 22, 20, "土"),    // 脾 461kHz/922kHz 纯八度
-        Triple("商(金)", 23, 22, "金"),    // 肺 326kHz/461kHz 近纯四度
-        Triple("角(木)", 16, 15, "木"),    // 肝 3.69M/5.21M 近纯四度
-        Triple("羽(水)", 30, 28, "水"),    // 肾 29kHz/58kHz 纯八度
-        Triple("徵(火)", 27, 25, "火"),    // 心 81kHz/163kHz 纯八度
+        WuyinNote("宫(土)", 22, 20, "土"),  // 脾 461k/922k 纯八度
+        WuyinNote("商(金)", 23, 22, "金"),  // 肺 326k/461k 近纯四度
+        WuyinNote("角(木)", 16, 15, "木"),  // 肝 3.69M/5.21M 近纯四度
+        WuyinNote("羽(水)", 30, 28, "水"),  // 肾 29k/58k 纯八度
+        WuyinNote("徵(火)", 27, 25, "火"),  // 心 81k/163k 纯八度
     )
     private var wuyinIdx = 0  // 轮转索引
 
     private fun treatWuyin(b9: Int, delta: Double, adjust: Int) {
         val base = cureBaseAmp(b9)
         // 找到最近的五音映射
-        val (label, ch1b9, ch2b9, wx) = WUYIN_SEQ[wuyinIdx % WUYIN_SEQ.size]
+        val note = WUYIN_SEQ[wuyinIdx % WUYIN_SEQ.size]
         wuyinIdx++
         val b11 = if (delta > 0) (base - adjust).coerceIn(3, 172)
                  else (base + adjust).coerceIn(3, 172)
         val b15 = if (delta > 0) (base + adjust).coerceIn(3, 172)
                  else (base - adjust).coerceIn(3, 172)
-        buf.fill(0); buf[9] = ch1b9.toByte(); buf[11] = b11.toByte()
-        buf[13] = ch2b9.toByte(); buf[15] = b15.toByte()
+        buf.fill(0); buf[9] = note.ch1b9.toByte(); buf[11] = b11.toByte()
+        buf[13] = note.ch2b9.toByte(); buf[15] = b15.toByte()
         try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
-        lastTx = TxInfo(ch1b9, b11, ch2b9, b15)
-        onLog?.invoke("    🎵$label CH1=${ch1b9} CH2=${ch2b9} | ${lastTx.fmt()}")
+        lastTx = TxInfo(note.ch1b9, b11, note.ch2b9, b15)
+        onLog?.invoke("    🎵${note.label} CH1=${note.ch1b9} CH2=${note.ch2b9} | ${lastTx.fmt()}")
     }
 
     fun stop() {
