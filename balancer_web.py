@@ -950,7 +950,7 @@ canvas{display:block;margin:0 auto;border-radius:8px}
     <button class="algo-btn active" onclick="setAlgo('ab')" id="abAB">🔄八维</button>
   </div>
   <div id="abStats" style="font-size:10px;color:#aaa;margin-top:4px"></div>
-  <div id="abBars" style="margin-top:3px">
+  <div id="abBars" style="margin-top:3px;display:none">
     <div style="display:flex;align-items:center;gap:4px;margin-bottom:2px">
       <span style="font-size:9px;color:#ffcc44;width:30px;text-align:right;flex-shrink:0">原版</span>
       <div style="flex:1;height:7px;border-radius:3px;background:#222"><div id="barOrg" style="background:#ffcc44;width:0%;height:100%;border-radius:3px;transition:width .4s,opacity .3s"></div></div>
@@ -1379,12 +1379,12 @@ function poll(){
         return '<span'+hl+'>'+a.name+'</span> <span style=\"color:#0f8;font-size:9px\">+'+imp+'</span><span style=\"color:#f44;font-size:9px\">-'+wors+'</span><b>'+a.rate+'%</b>';
       });
       ab.innerHTML='🏆 '+abLines.join('  ');
-      barIds.forEach(function(id){var row=document.getElementById(id).parentNode.parentNode;row.style.display='';});
+      barIds.forEach(function(id){var el=document.getElementById(id);if(el&&el.parentNode&&el.parentNode.parentNode){el.parentNode.parentNode.style.display=''}});
       // 突显当前算法bar
-      barIds.forEach(function(id){document.getElementById(id).style.opacity='1'});
+      barIds.forEach(function(id){var el=document.getElementById(id);if(el)el.style.opacity='1'});
       if(curAlgoKey){
         var curBarId={original:'barOrg',legacy:'barLeg',yinyang:'barYY',fusion:'barFus',schumann:'barSch',water:'barH2O',jellium:'barJEL',multiharm:'barMH'}[curAlgoKey];
-        if(curBarId) document.getElementById(curBarId).style.opacity='1';
+        if(curBarId){var cel=document.getElementById(curBarId);if(cel)cel.style.opacity='1'}
       }
       document.getElementById('barOrg').style.width=(orgRate=='-'?0:Math.max(1,orgRate))+'%';
       document.getElementById('barLeg').style.width=(legRate=='-'?0:Math.max(1,legRate))+'%';
@@ -1395,7 +1395,7 @@ function poll(){
       document.getElementById('barJEL').style.width=(jelRate=='-'?0:Math.max(1,jelRate))+'%';
       document.getElementById('barMH').style.width=(mhRate=='-'?0:Math.max(1,mhRate))+'%';
     } else {
-      barIds.forEach(function(id){var row=document.getElementById(id).parentNode.parentNode;row.style.display='none';});
+      barIds.forEach(function(id){var el=document.getElementById(id);if(el&&el.parentNode&&el.parentNode.parentNode){el.parentNode.parentNode.style.display='none'}});
       var cur=s.algo||'yinyang';
       var curName={original:'🔗原版(PCAP)',legacy:'同频反相',yinyang:'☀☽双频',fusion:'⚡融合',schumann:'🌍舒曼锚',water:'💧水共振',jellium:'⚛幻数'}[cur]||cur;
       var curStat={original:org,legacy:leg,yinyang:yy,fusion:fus,schumann:sch,water:s.water||{imp:0,wors:0,rounds:0},jellium:s.jellium||{imp:0,wors:0,rounds:0}}[cur]||{imp:0,wors:0,rounds:0};
@@ -1406,9 +1406,9 @@ function poll(){
 
     // Coupling badge
     var cp=s.coupling||50,cpColor=cp>70?'#00ff88':cp>40?'#ffaa00':'#ff4444';
-    document.getElementById('couplingBadge').innerHTML='∿ <b style=\"color:'+cpColor+'\">'+cp+'</b>';
+    var cb=document.getElementById('couplingBadge');if(cb)cb.innerHTML='∿ <b style=\"color:'+cpColor+'\">'+cp+'</b>';
     var se=s.spectral_entropy||0.5,seColor=se>0.7?'#ffaa00':se>0.5?'#00ff88':'#4488ff';
-    document.getElementById('entropyBadge').innerHTML='H <b style=\"color:'+seColor+'\">'+se.toFixed(3)+'</b>';
+    var eb=document.getElementById('entropyBadge');if(eb)eb.innerHTML='H <b style=\"color:'+seColor+'\">'+se.toFixed(3)+'</b>';
     var de=s.delta_eps||0,deColor=de>0.3?'#ffaa00':de>0?'#00ff88':'#888';
     var ni=s.nonlinear_ni||0,niColor=ni>0.15?'#ffaa00':ni>0.05?'#00ff88':'#888';
     var ba=document.getElementById('bioBadge')||document.createElement('span');
@@ -1431,19 +1431,21 @@ function poll(){
 
     // Deltas list (hidden, used for data, was previously visible in list tab)
     var dl=document.getElementById('deltas');
-    if(dl && items.length>0){
-      var h='';
-      for(var i=0;i<items.length;i++){
-        var o=items[i],ad=Math.abs(o.delta),c=ad>8?'#ff4444':ad>4?'#ffaa00':'#00ff88';
-        var vfy=o.verified!=null?' <span style="font-size:9px;color:'+(o.verified>0?'#00ff88':'#ff4444')+'">'+(o.verified>0?'↓'+o.verified:'↑'+Math.abs(o.verified))+'</span>':'';
-        var yy=' <span style=\"font-size:8px;color:#666\">'+(o.sun>o.moon?'☀'+o.sun_b9:'☽'+o.moon_b9)+'</span>';
-        h+='<div class="row">'
-          +'<span>'+o.organ+yy+'</span>'
-          +'<span class="badge" style="color:'+c+'">Δ'+o.delta.toFixed(1)+vfy+'</span>'
-          +'</div>';
-      }
-      dl.innerHTML=h;
-    }else{dl.innerHTML='<div style="color:#555;text-align:center;padding:20px">等待扫描数据…</div>'}
+    if(dl){
+      if(items.length>0){
+        var h='';
+        for(var i=0;i<items.length;i++){
+          var o=items[i],ad=Math.abs(o.delta),c=ad>8?'#ff4444':ad>4?'#ffaa00':'#00ff88';
+          var vfy=o.verified!=null?' <span style="font-size:9px;color:'+(o.verified>0?'#00ff88':'#ff4444')+'">'+(o.verified>0?'↓'+o.verified:'↑'+Math.abs(o.verified))+'</span>':'';
+          var yy=' <span style=\"font-size:8px;color:#666\">'+(o.sun>o.moon?'☀'+o.sun_b9:'☽'+o.moon_b9)+'</span>';
+          h+='<div class="row">'
+            +'<span>'+o.organ+yy+'</span>'
+            +'<span class="badge" style="color:'+c+'">Δ'+o.delta.toFixed(1)+vfy+'</span>'
+            +'</div>';
+        }
+        dl.innerHTML=h;
+      }else{dl.innerHTML='<div style="color:#555;text-align:center;padding:20px">等待扫描数据…</div>'}
+    }
 
     var lg=document.getElementById('log');
     lg.innerHTML=(s.log||[]).slice(0,20).map(function(l){return'<div>'+l+'</div>'}).join('');
