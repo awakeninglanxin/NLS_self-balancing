@@ -185,51 +185,58 @@ class ChartView @JvmOverloads constructor(
     }
 
     private fun drawAlgoCompare(canvas: Canvas) {
-        val w = width.toFloat(); val h = height.toFloat()
-        if (algoCompareData.isEmpty()) {
-            paint.color = Color.parseColor("#555555"); paint.textSize = 30f
-            canvas.drawText("等待统计…", w / 2, h / 2 + 8f, paint)
-            return
+        try {
+            val w = width.toFloat(); val h = height.toFloat()
+            val data = algoCompareData.toList()  // defensive copy
+            if (data.isEmpty()) {
+                paint.color = Color.parseColor("#555555"); paint.textSize = 30f
+                canvas.drawText("等待统计…", w / 2, h / 2 + 8f, paint)
+                return
+            }
+
+            val barH = (h - 60f) / data.size.coerceAtLeast(1)
+            val colors = intArrayOf(
+                Color.parseColor("#ff4444"), Color.parseColor("#ffaa00"),
+                Color.parseColor("#ffdd00"), Color.parseColor("#44ff44"),
+                Color.parseColor("#4488ff"), Color.parseColor("#aa44ff"),
+                Color.parseColor("#ff44aa")
+            )
+
+            for ((i, d) in data.withIndex()) {
+                val y = 30f + i * barH
+                val total = (d.imp + d.wors).coerceAtLeast(1)
+                val rate = d.imp.toFloat() / total
+                val fullW = (w - 200f).coerceAtLeast(1f)
+
+                // Label
+                paint.color = Color.parseColor("#aaa"); paint.textSize = 22f
+                paint.textAlign = Paint.Align.LEFT
+                canvas.drawText("${d.name}", 10f, y + barH / 2 + 7f, paint)
+
+                // Bar background
+                paint.color = Color.parseColor("#222233")
+                paint.style = Paint.Style.FILL
+                canvas.drawRect(130f, y + 2f, 130f + fullW, y + barH - 2f, paint)
+
+                // Bar fill
+                paint.color = colors[i % colors.size]
+                canvas.drawRect(130f, y + 2f, 130f + fullW * rate, y + barH - 2f, paint)
+
+                // Rate text
+                paint.color = Color.parseColor("#00ff88"); paint.textSize = 18f
+                val pct = (rate * 100).toInt()
+                val rateStr = "${pct}%  ↑${d.imp} ↓${d.wors}"
+                canvas.drawText(rateStr, 136f, y + barH / 2 + 6f, paint)
+            }
+
+            paint.textAlign = Paint.Align.CENTER
+            paint.color = Color.parseColor("#00ff88"); paint.textSize = 20f
+            canvas.drawText("七维算法对比 (改善率)", w / 2, 20f, paint)
+        } catch (e: Exception) {
+            val w = width.toFloat(); val h = height.toFloat()
+            paint.color = Color.parseColor("#ff4444"); paint.textSize = 24f
+            canvas.drawText("对比图表错误: ${e.message}", w / 2, h / 2 + 8f, paint)
         }
-
-        val barH = (h - 60f) / algoCompareData.size.coerceAtLeast(1)
-        val colors = intArrayOf(
-            Color.parseColor("#ff4444"), Color.parseColor("#ffaa00"),
-            Color.parseColor("#ffdd00"), Color.parseColor("#44ff44"),
-            Color.parseColor("#4488ff"), Color.parseColor("#aa44ff"),
-            Color.parseColor("#ff44aa")
-        )
-
-        for ((i, d) in algoCompareData.withIndex()) {
-            val y = 30f + i * barH
-            val total = (d.imp + d.wors).coerceAtLeast(1)
-            val rate = d.imp.toFloat() / total
-            val fullW = w - 200f
-
-            // Label
-            paint.color = Color.parseColor("#aaa"); paint.textSize = 22f
-            paint.textAlign = Paint.Align.LEFT
-            canvas.drawText("${d.name}", 10f, y + barH / 2 + 7f, paint)
-
-            // Bar background
-            paint.color = Color.parseColor("#222233")
-            paint.style = Paint.Style.FILL
-            canvas.drawRect(130f, y + 2f, 130f + fullW, y + barH - 2f, paint)
-
-            // Bar fill
-            paint.color = colors[i % colors.size]
-            canvas.drawRect(130f, y + 2f, 130f + fullW * rate, y + barH - 2f, paint)
-
-            // Rate text
-            paint.color = Color.parseColor("#00ff88"); paint.textSize = 18f
-            paint.textAlign = Paint.Align.LEFT
-            val rateStr = "%.0f%%  ↑%d ↓%d".format(rate * 100, d.imp, d.wors)
-            canvas.drawText(rateStr, 136f, y + barH / 2 + 6f, paint)
-        }
-
-        paint.textAlign = Paint.Align.CENTER
-        paint.color = Color.parseColor("#00ff88"); paint.textSize = 20f
-        canvas.drawText("七维算法对比 (改善率)", w / 2, 20f, paint)
     }
 
     fun setTab(m: Mode) { mode = m; invalidate() }

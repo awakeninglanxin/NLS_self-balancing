@@ -250,13 +250,14 @@ class BalancerEngine(private val ctx: Context) {
                 // Batch report: after every 7 rounds
                 if (round % 7 == 1 && round > 1) {
                     val prevBatch = batchNum
-                    val report = algoStats.toMap()
+                    // Deep copy stats for thread safety
+                    val report = algoStats.mapValues { e -> AlgoStat(e.value.imp, e.value.wors, e.value.rounds) }
                     onBatchReport?.invoke(prevBatch, report)
                     // Log summary
                     val parts = mutableListOf<String>()
                     for ((algo, st) in report) {
                         val total = st.imp + st.wors
-                        val rate = if (total > 0) "%.0f%%".format(st.imp * 100.0 / total) else "--"
+                        val rate = if (total > 0) "${(st.imp * 100 / total).toInt()}%" else "--"
                         val name = mapOf("original" to "🔗原版", "legacy" to "同频", "yinyang" to "☀☽",
                             "fusion" to "融合", "schumann" to "舒曼", "water" to "水共振", "jellium" to "⚛幻数")[algo] ?: algo
                         parts.add("$name $rate")
