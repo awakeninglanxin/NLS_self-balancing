@@ -27,7 +27,7 @@ class BalancerEngine(private val ctx: Context) {
     var onProgress: ((Int, Int) -> Unit)? = null
     var onRound: ((Int) -> Unit)? = null
     var onLog: ((String) -> Unit)? = null
-    var onBand: ((Int, String, Double, String) -> Unit)? = null  // b9, organ, delta, wuxing
+    var onChart: ((deltas: List<ChartDelta>, wuxing: Map<String, Double>) -> Unit)? = null
     var isPlaying = false; private set
     var isConnected = false; private set
     var isCalibrated = false; private set
@@ -119,6 +119,7 @@ class BalancerEngine(private val ctx: Context) {
 
     /** 18频段 b9=14~31 分频器模型: f=7.3728/2^((b9-14)/2), 20kHz~7.37MHz */
     data class Band(val b9: Int, val organ: String, val wuxing: String, val freqKhz: Int)
+    data class ChartDelta(val b9: Int, val organ: String, val wuxing: String, val delta: Double)
 
     private val bands = listOf(
         Band(14, "松果体/脑中枢", "火", 7373), Band(15, "下丘脑/内分泌", "火", 5213),
@@ -203,6 +204,12 @@ class BalancerEngine(private val ctx: Context) {
                     deltas[bands[i].b9] = raw - bl
                     onProgress?.invoke(i + 1, bands.size)
                 }
+
+                // Fire chart data
+                val cd = bands.map { ChartDelta(it.b9, it.organ, it.wuxing, deltas[it.b9] ?: 0.0) }
+                val wx = mutableMapOf("火" to 0.0, "土" to 0.0, "金" to 0.0, "水" to 0.0, "木" to 0.0)
+                for (b in bands) wx[b.wuxing] = (wx[b.wuxing] ?: 0.0) + (deltas[b.b9] ?: 0.0)
+                onChart?.invoke(cd, wx)
 
                 val abnormal = bands.filter { abs(deltas[it.b9] ?: 0.0) > 4 }
                 if (abnormal.isNotEmpty()) {

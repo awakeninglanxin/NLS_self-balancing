@@ -1,10 +1,13 @@
 package com.nls.selfbalancing
 
 import android.app.AlertDialog
+import android.graphics.Color
 import android.os.Bundle
 import android.os.Looper
 import android.os.Handler
+import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -14,6 +17,10 @@ import java.io.StringWriter
 class MainActivity : AppCompatActivity() {
     private lateinit var engine: BalancerEngine
     private val mainHandler = Handler(Looper.getMainLooper())
+    private var chartView: ChartView? = null
+    private var tabRadar: TextView? = null
+    private var tabBands: TextView? = null
+    private var tabRidge: TextView? = null
 
     private lateinit var statusDot: View
     private lateinit var statusText: TextView
@@ -26,21 +33,17 @@ class MainActivity : AppCompatActivity() {
     private lateinit var progress: ProgressBar
     private lateinit var bandsContainer: LinearLayout
     private lateinit var logContainer: LinearLayout
+    private lateinit var tabHost: LinearLayout
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // ★ 全局崩溃捕获
         val oldHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, ex ->
-            val sw = StringWriter()
-            ex.printStackTrace(PrintWriter(sw))
+            val sw = StringWriter(); ex.printStackTrace(PrintWriter(sw))
             val msg = "崩溃: ${ex.javaClass.simpleName}\n${ex.message ?: ""}\n${sw.toString().take(500)}"
             try {
-                AlertDialog.Builder(this@MainActivity)
-                    .setTitle("💥 闪退诊断")
-                    .setMessage(msg.take(800))
+                AlertDialog.Builder(this@MainActivity).setTitle("💥 闪退诊断").setMessage(msg.take(800))
                     .setPositiveButton("知道了") { _, _ -> oldHandler?.uncaughtException(thread, ex) }
-                    .setCancelable(false)
-                    .show()
+                    .setCancelable(false).show()
             } catch (_: Exception) {
                 try { Toast.makeText(this@MainActivity, msg.take(200), Toast.LENGTH_LONG).show(); Thread.sleep(3000) } catch (_: Exception) {}
                 oldHandler?.uncaughtException(thread, ex)
@@ -54,6 +57,7 @@ class MainActivity : AppCompatActivity() {
         engine.initialize()
 
         bindViews()
+        buildTabHost()
         setupCallbacks()
 
         connectBtn.setOnClickListener { onConnect() }
@@ -76,6 +80,56 @@ class MainActivity : AppCompatActivity() {
         progress = findViewById(R.id.progress)
         bandsContainer = findViewById(R.id.bandsContainer)
         logContainer = findViewById(R.id.logContainer)
+        tabHost = findViewById(R.id.tabHost)
+    }
+
+    private fun buildTabHost() {
+        val ctx = this
+
+        // Tab row
+        val tabRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER
+            setPadding(0, 2, 0, 2)
+        }
+        fun makeTab(label: String, onClick: () -> Unit): TextView {
+            return TextView(ctx).apply {
+                text = label; textSize = 11f
+                setTextColor(Color.parseColor("#888888"))
+                setPadding(20, 8, 20, 8)
+                setBackgroundColor(Color.parseColor("#111122"))
+                isClickable = true; isFocusable = true
+                setOnClickListener { onClick() }
+            }
+        }
+        tabRadar = makeTab("☯ 五行") { switchTab(ChartView.Mode.RADAR) }
+        tabBands = makeTab("📊 偏差") { switchTab(ChartView.Mode.BANDS) }
+        tabRidge = makeTab("📈 脊线") { switchTab(ChartView.Mode.RIDGE) }
+        tabRow.addView(tabRadar)
+        tabRow.addView(tabBands)
+        tabRow.addView(tabRidge)
+
+        // Chart area
+        val chartFrame = FrameLayout(ctx).apply {
+            setBackgroundColor(Color.parseColor("#0d0d1a"))
+            layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(180))
+        }
+        chartView = ChartView(ctx).apply {
+            layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        }
+        chartFrame.addView(chartView)
+
+        tabHost.addView(tabRow)
+        tabHost.addView(chartFrame)
+        switchTab(ChartView.Mode.BANDS)
+    }
+
+    private fun switchTab(mode: ChartView.Mode) {
+        chartView?.setTab(mode)
+        val active = 0xFF00e5a0.toInt()
+        val inactive = 0xFF888888.toInt()
+        tabRadar?.setTextColor(if (mode == ChartView.Mode.RADAR) active else inactive)
+        tabBands?.setTextColor(if (mode == ChartView.Mode.BANDS) active else inactive)
+        tabRidge?.setTextColor(if (mode == ChartView.Mode.RIDGE) active else inactive)
     }
 
     private fun setupCallbacks() {
@@ -85,14 +139,21 @@ class MainActivity : AppCompatActivity() {
             mainHandler.post { progress.progress = cur; progress.max = max }
         }
         engine.onLog = { msg -> mainHandler.post { addLog(msg) } }
+        engine.onChart = { deltas, wuxing ->
+            mainHandler.post {
+                chartView?.let { cv ->
+                    cv.deltaData = deltas.map { ChartView.BandDelta(it.b9, it.organ, it.wuxing, it.delta) }
+                    cv.wuxingData = wuxing
+                    cv.invalidate()
+                }
+            }
+        }
     }
 
     private fun onConnect() {
         if (engine.isConnected) { engine.disconnect(); updateUI(); return }
         connectBtn.isEnabled = false; connectBtn.text = "连接中…"
-        engine.connect { ok, msg ->
-            mainHandler.post { addLog(msg); updateUI() }
-        }
+        engine.connect { ok, msg -> mainHandler.post { addLog(msg); updateUI() } }
     }
 
     private fun onCalibrate() {
@@ -106,6 +167,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun onBalance() {
         if (engine.isPlaying) { engine.stop(); updateUI(); return }
+        tabHost.visibility = View.VISIBLE
         engine.startBalance(); updateUI()
     }
 
@@ -133,6 +195,8 @@ class MainActivity : AppCompatActivity() {
         logContainer.addView(tv, 0)
         if (logContainer.childCount > 50) logContainer.removeViewAt(logContainer.childCount - 1)
     }
+
+    private fun dp(v: Int): Int = (v * resources.displayMetrics.density + 0.5f).toInt()
 
     override fun onDestroy() { engine.destroy(); super.onDestroy() }
 }

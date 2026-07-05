@@ -106,6 +106,14 @@
         android:layout_marginTop="4dp"
         android:layout_marginBottom="4dp" />
 
+    <!-- Tab+Chart placeholder (views added programmatically) -->
+    <LinearLayout
+        android:id="@+id/tabHost"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:visibility="gone" />
+
     <!-- Scan Results -->
     <TextView
         android:layout_width="match_parent"
