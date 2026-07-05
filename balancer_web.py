@@ -104,6 +104,7 @@ class Balancer:
         self._pending_start = False  # 校准完成前点了开始→排队标记
         self.scan_amp = 20  # 扫描振幅 (3-80), 默认20比原15更敏感
         self.per_b9_amp = {}  # {b9: amp} 每个频段的独立最优振幅 (auto_tune填充)
+        self.treat_speed = 1.0  # 治疗时间周期倍数 1~12
         # 每次启动清空旧基线，强制重新悬空校准
         if os.path.exists(BASELINE_FILE):
             os.remove(BASELINE_FILE)
@@ -647,6 +648,11 @@ class Balancer:
             time.sleep(0.08)
         return balanced
 
+    def _treat_sleep(self, t=0.08):
+        """治疗延时 = 基础秒 × treat_speed倍数"""
+        time.sleep(t * self.treat_speed)
+
+    # 治疗循环中的延时（从 verify 后开始）
     def verify(self, before):
         """复扫验证：对比治疗前后偏差"""
         imp, wors = 0, 0
@@ -1144,6 +1150,11 @@ canvas{display:block;margin:0 auto;border-radius:8px}
     <span id="scanAmpVal" style="font-size:11px;color:#aaa;min-width:28px">20</span>
     <button class="algo-btn" onclick="autoTune()" style="font-size:10px;padding:2px 8px;white-space:nowrap" title="自动扫10档振幅找最优性价比">🎯 一键最优</button>
   </div>
+  <div style="display:flex;align-items:center;gap:6px;margin:4px 0">
+    <span style="font-size:10px;color:#888">⚡治疗周期</span>
+    <input type="range" id="speedSlider" min="1" max="12" value="1" style="flex:1;accent-color:#ff6600;height:4px" oninput="setSpeed(this.value)">
+    <span id="speedVal" style="font-size:11px;color:#aaa;min-width:28px">×1</span>
+  </div>
   <div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap">
     <button class="algo-btn" onclick="setAlgo('original')" id="abORG">🔗原版</button>
     <button class="algo-btn" onclick="setAlgo('yinyang')" id="abYY">☀☽</button>
@@ -1423,6 +1434,11 @@ function setScanAmp(v){
   fetch('/set_scan_amp/'+v).then(function(r){return r.json()}).then(function(d){
     if(d.ok){document.getElementById('baselineDot').style.background='#f44'}
   });
+}
+
+function setSpeed(v){
+  document.getElementById('speedVal').textContent='×'+v;
+  fetch('/set_speed/'+v);
 }
 
 function autoTune(){
@@ -1815,6 +1831,14 @@ class WebHandler(BaseHTTPRequestHandler):
                 self.send_json({"ok": True, "scan_amp": amp})
             except:
                 self.send_json({"ok": False, "msg": "无效振幅值"})
+        elif p.path.startswith("/set_speed/"):
+            try:
+                spd = max(1, min(12, float(p.path.split("/")[-1])))
+                self.balancer.treat_speed = spd
+                self.balancer.add_log(f"⚡ 治疗周期 ×{spd:.0f}")
+                self.send_json({"ok": True, "speed": spd})
+            except:
+                self.send_json({"ok": False, "msg": "无效速度值"})
         elif p.path == "/diag_channels":
             if not self.balancer.ser or not self.balancer.ser.is_open:
                 self.send_json({"ok": False, "msg": "手环未连接"})
