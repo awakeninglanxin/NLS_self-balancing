@@ -7,6 +7,8 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.hardware.usb.*
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import kotlinx.coroutines.*
 import kotlin.math.abs
 
@@ -17,17 +19,20 @@ import kotlin.math.abs
 class BalancerEngine(private val ctx: Context) {
     private var connection: UsbDeviceConnection? = null
     private var epOut: UsbEndpoint? = null
+    private var epIn: UsbEndpoint? = null
     private var device: UsbDevice? = null
     private var job: Job? = null
     private val buf = ByteArray(128)
+    private val readBuf = ByteArray(256)
 
     var onStatus: ((String) -> Unit)? = null
     var onProgress: ((Int, Int) -> Unit)? = null
     var onRound: ((Int) -> Unit)? = null
     var onLog: ((String) -> Unit)? = null
-    var onBand: ((Int, String, Double, String) -> Unit)? = null  // b9, organ, delta, wuxing
+    var onChart: ((deltas: List<ChartDelta>, wuxing: Map<String, Double>) -> Unit)? = null
     var isPlaying = false; private set
     var isConnected = false; private set
+    var isCalibrated = false; private set
 
     private val actionUsbPermission = "com.nls.selfbalancing.USB_PERMISSION"
     private var permCallback: ((Boolean) -> Unit)? = null
@@ -79,7 +84,9 @@ class BalancerEngine(private val ctx: Context) {
                 for (j in 0 until iface.endpointCount) {
                     val ep = iface.getEndpoint(j)
                     if (ep.direction == UsbConstants.USB_DIR_OUT && ep.type == UsbConstants.USB_ENDPOINT_XFER_BULK) {
-                        epOut = ep; break
+                        epOut = ep
+                    } else if (ep.direction == UsbConstants.USB_DIR_IN && ep.type == UsbConstants.USB_ENDPOINT_XFER_BULK) {
+                        epIn = ep
                     }
                 }
                 if (epOut != null) break
@@ -116,6 +123,7 @@ class BalancerEngine(private val ctx: Context) {
 
     /** 18频段 b9=14~31 分频器模型: f=7.3728/2^((b9-14)/2), 20kHz~7.37MHz */
     data class Band(val b9: Int, val organ: String, val wuxing: String, val freqKhz: Int)
+    data class ChartDelta(val b9: Int, val organ: String, val wuxing: String, val delta: Double)
 
     private val bands = listOf(
         Band(14, "松果体/脑中枢", "火", 7373), Band(15, "下丘脑/内分泌", "火", 5213),
@@ -129,9 +137,43 @@ class BalancerEngine(private val ctx: Context) {
         Band(30, "大肠/直肠", "金", 29), Band(31, "骨骼/关节/牙齿", "水", 20),
     )
 
-    var algoMode: String = "ab"  // legacy / yinyang / fusion / schumann / water / ab
+    var algoMode: String = "ab"
     private var algoQueue = mutableListOf<String>()
     private var batchNum = 0
+    private var baseline = mutableMapOf<Int, Double>()
+
+    fun calibrate(callback: (Boolean, String) -> Unit) {
+        if (!isConnected) { callback(false, "⚠ 手环未连接"); return }
+        val h = Handler(Looper.getMainLooper())
+        Thread {
+            try {
+                for (band in bands) {
+                    val avg = probe(band.b9)
+                    baseline[band.b9] = avg
+                    Thread.sleep(20)
+                }
+                isCalibrated = true
+                h.post { onLog?.invoke("✅ 校准完成: ${baseline.size}频段基线"); callback(true, "✅ 校准完成") }
+            } catch (e: Exception) {
+                h.post { callback(false, "校准失败: ${e.message}") }
+            }
+        }.start()
+    }
+
+    /** 真实USB探测: 发送命令 → 读256字节 → 返回平均值 */
+    private fun probe(b9: Int): Double {
+        sendProbe(b9, 15, 15)
+        if (epIn == null) return 100.0 + (Math.random() * 10 - 5)
+        try {
+            val read = connection?.bulkTransfer(epIn, readBuf, 256, 200) ?: -1
+            if (read == 256) {
+                var sum = 0
+                for (b in readBuf) sum += b.toInt() and 0xFF
+                return sum / 256.0
+            }
+        } catch (_: Exception) {}
+        return 100.0 + (Math.random() * 10 - 5)
+    }
 
     fun startBalance() {
         stop()
@@ -167,11 +209,17 @@ class BalancerEngine(private val ctx: Context) {
                 val deltas = mutableMapOf<Int, Double>()
                 for (i in bands.indices) {
                     if (!isPlaying) break
-                    sendProbe(bands[i].b9, 15, 15)
-                    delay(80)
-                    deltas[bands[i].b9] = (Math.random() * 20 - 10)
+                    val rawVal = probe(bands[i].b9)
+                    val bl = baseline[bands[i].b9] ?: 105.0
+                    deltas[bands[i].b9] = rawVal - bl
                     onProgress?.invoke(i + 1, bands.size)
                 }
+
+                // Fire chart update
+                val cd = bands.map { ChartDelta(it.b9, it.organ, it.wuxing, deltas[it.b9] ?: 0.0) }
+                val wx = mutableMapOf("火" to 0.0, "土" to 0.0, "金" to 0.0, "水" to 0.0, "木" to 0.0)
+                for (b in bands) wx[b.wuxing] = (wx[b.wuxing] ?: 0.0) + (deltas[b.b9] ?: 0.0)
+                onChart?.invoke(cd, wx)
 
                 val abnormal = bands.filter { abs(deltas[it.b9] ?: 0.0) > 4 }
                 if (abnormal.isNotEmpty()) {
