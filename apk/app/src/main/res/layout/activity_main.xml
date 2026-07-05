@@ -7,33 +7,14 @@
     android:background="#0a0a14">
 
     <!-- Header -->
-    <LinearLayout
-        android:layout_width="match_parent"
+    <TextView
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:layout_marginBottom="12dp">
-        <TextView
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="NLS 动态平衡仪 v7.12"
-            android:textColor="#00e5a0"
-            android:textSize="18sp"
-            android:textStyle="bold" />
-        <TextView
-            android:id="@+id/calBtn"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="📐 校准"
-            android:textColor="#7c4dff"
-            android:textSize="13sp"
-            android:paddingHorizontal="8dp"
-            android:paddingVertical="4dp"
-            android:clickable="true"
-            android:focusable="true"
-            android:background="?attr/selectableItemBackground" />
-    </LinearLayout>
+        android:text="NLS 动态平衡仪 v7.5"
+        android:textColor="#00e5a0"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="12dp" />
 
     <!-- Status Bar -->
     <LinearLayout
@@ -60,6 +41,18 @@
             android:text="未连接"
             android:textColor="#aaa"
             android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/calBtn"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="📐"
+            android:textColor="#7c4dff"
+            android:textSize="14sp"
+            android:paddingHorizontal="6dp"
+            android:clickable="true"
+            android:focusable="true"
+            android:layout_marginEnd="6dp" />
 
         <TextView
             android:id="@+id/connectBtn"
@@ -112,47 +105,6 @@
         android:progress="0"
         android:layout_marginTop="4dp"
         android:layout_marginBottom="4dp" />
-
-    <!-- Tab Buttons -->
-    <LinearLayout
-        android:id="@+id/tabRow"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center"
-        android:layout_marginTop="2dp"
-        android:layout_marginBottom="2dp"
-        android:visibility="gone">
-
-        <TextView android:id="@+id/tabRadar" android:text="☯ 五行"
-            android:textColor="#00e5a0" android:textSize="11sp"
-            android:paddingHorizontal="10dp" android:paddingVertical="4dp"
-            android:background="#112222"
-            android:clickable="true" android:focusable="true"
-            android:layout_marginEnd="2dp" />
-
-        <TextView android:id="@+id/tabBands" android:text="📊 偏差"
-            android:textColor="#888" android:textSize="11sp"
-            android:paddingHorizontal="10dp" android:paddingVertical="4dp"
-            android:background="#111122"
-            android:clickable="true" android:focusable="true"
-            android:layout_marginEnd="2dp" />
-
-        <TextView android:id="@+id/tabRidge" android:text="📈 脊线"
-            android:textColor="#888" android:textSize="11sp"
-            android:paddingHorizontal="10dp" android:paddingVertical="4dp"
-            android:background="#111122"
-            android:clickable="true" android:focusable="true" />
-    </LinearLayout>
-
-    <!-- Chart Area -->
-    <FrameLayout
-        android:id="@+id/chartContainer"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="3"
-        android:background="#0d0d1a"
-        android:visibility="gone" />
 
     <!-- Scan Results -->
     <TextView
