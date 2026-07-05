@@ -400,7 +400,7 @@ class BalancerEngine(private val ctx: Context) {
             buf.fill(0); buf[9] = b9.toByte(); buf[11] = b11.toByte()
             buf[13] = ch2b9.toByte(); buf[15] = (b15 / 2).toByte()
             try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
-            lastTx = TxInfo(b9, b11, ch2b9, (b15 / 2).toByte())
+            lastTx = TxInfo(b9, b11, ch2b9, b15 / 2)
         }
     }
 
