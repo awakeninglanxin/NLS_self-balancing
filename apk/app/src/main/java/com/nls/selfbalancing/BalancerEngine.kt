@@ -177,19 +177,19 @@ class BalancerEngine(private val ctx: Context) {
                 val useAlgo = if (algoMode == "ab") {
                     if (algoQueue.isEmpty()) {
                         batchNum++
-                        algoQueue = mutableListOf("legacy", "yinyang", "fusion", "schumann", "water")
+                        algoQueue = mutableListOf("original", "legacy", "yinyang", "fusion", "schumann", "water", "jellium")
                         algoQueue.shuffle()
                         val labels = algoQueue.joinToString(" → ") {
-                            mapOf("legacy" to "同频", "yinyang" to "☀☽", "fusion" to "融合",
-                                "schumann" to "舒曼", "water" to "水团簇").getOrDefault(it, it)
+                            mapOf("original" to "🔗原版", "legacy" to "同频", "yinyang" to "☀☽",
+                                "fusion" to "融合", "schumann" to "舒曼", "water" to "水共振", "jellium" to "⚛幻数").getOrDefault(it, it)
                         }
                         onLog?.invoke("─── 第${batchNum}遍: $labels ───")
                     }
                     algoQueue.removeAt(0)
                 } else algoMode
 
-                val label = mapOf("legacy" to "同频反相", "yinyang" to "☀☽双频",
-                    "fusion" to "⚡融合", "schumann" to "🌍舒曼锚", "water" to "💧水团簇")
+                val label = mapOf("original" to "🔗原版", "legacy" to "同频反相", "yinyang" to "☀☽双频",
+                    "fusion" to "⚡融合", "schumann" to "🌍舒曼锚", "water" to "💧水共振", "jellium" to "⚛幻数")
                     .getOrDefault(useAlgo, useAlgo)
                 onLog?.invoke("第${round}轮 — 扫描中… [$label]")
                 onStatus?.invoke(label)
@@ -220,10 +220,12 @@ class BalancerEngine(private val ctx: Context) {
                         val corr = wuxingCorr(band.wuxing)
                         val adjust = (abs(delta) * 0.5 * corr).toInt().coerceAtMost(60)
                         when (useAlgo) {
+                            "original" -> treatOriginal(band.b9, delta, adjust)
                             "yinyang" -> treatYinyang(band.b9, delta, adjust)
                             "fusion" -> treatFusion(band.b9, delta, adjust)
                             "schumann" -> treatSchumann(band.b9, delta, adjust)
                             "water" -> treatWater(band.b9, delta, adjust)
+                            "jellium" -> treatJellium(band.b9, delta, adjust)
                             else -> treatLegacy(band.b9, delta, adjust)
                         }
                         onLog?.invoke("  ${band.organ} Δ=${"%.1f".format(delta)} ${band.freqStr()}")
@@ -309,6 +311,40 @@ class BalancerEngine(private val ctx: Context) {
         val b15 = if (delta > 0) (15 + adjust).coerceIn(3, 80) else (15 - adjust).coerceIn(3, 80)
         buf.fill(0); buf[9] = b9.toByte(); buf[11] = b11.toByte()
         buf[13] = b9.toByte(); buf[15] = b15.toByte()
+        try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
+    }
+
+    // ── ⑥ Original: PCAP逆推原版逼近 (同频54%+异频46%, 振幅边界复刻) ──
+    private fun treatOriginal(b9: Int, delta: Double, adjust: Int) {
+        val samePct = 54
+        val isSame = (abs(b9.hashCode()) % 100) < samePct
+        val b11 = if (delta > 0) maxOf(3, 15 - adjust) else minOf(80, 15 + adjust)
+        val b15 = if (delta > 0) minOf(80, 15 + adjust) else maxOf(3, 15 - adjust)
+        if (isSame) {
+            sendProbe(b9, b11, b15)
+        } else {
+            val offset = abs((b9 * 7 + delta.toInt()).hashCode()) % 15 + 1
+            val ch2b9 = minOf(31, b9 + offset)
+            buf.fill(0); buf[9] = b9.toByte(); buf[11] = b11.toByte()
+            buf[13] = ch2b9.toByte(); buf[15] = (b15 / 2).toByte()
+            try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
+        }
+    }
+
+    // ── ⑦ Jellium: 幻数共振 (JELLIUM_SEQUENCE阶梯振幅) ──
+    private val JELLIUM_SEQ = intArrayOf(2, 8, 20, 28, 50, 82, 92, 126, 138, 184, 258, 322)
+    private val JELLIUM_AMP = doubleArrayOf(0.25, 0.40, 0.60, 0.85, 1.15, 1.50, 0.80, 1.85, 2.20, 2.60, 3.00, 0.60)
+
+    private fun treatJellium(b9: Int, delta: Double, adjust: Int) {
+        val tier = (abs(delta) / 10).toInt().coerceIn(0, JELLIUM_SEQ.size - 1)
+        val shellNum = JELLIUM_SEQ[tier]
+        val ampBoost = JELLIUM_AMP[tier]
+        val adj = minOf(60, (abs(delta) * ampBoost).toInt())
+        val b11 = maxOf(3, 15 - adj)
+        val b15 = minOf(80, 15 + adj)
+        val ch2b9 = if (shellNum % 2 == 0) b9 else minOf(31, b9 + (shellNum % 5) + 1)
+        buf.fill(0); buf[9] = b9.toByte(); buf[11] = b11.toByte()
+        buf[13] = ch2b9.toByte(); buf[15] = b15.toByte()
         try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
     }
 
