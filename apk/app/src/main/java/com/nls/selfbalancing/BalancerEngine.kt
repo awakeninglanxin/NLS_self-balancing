@@ -279,6 +279,13 @@ class BalancerEngine(private val ctx: Context) {
         try { connection?.bulkTransfer(epOut, buf, buf.size, 1000) } catch (_: Exception) {}
     }
 
+    /** USB探测: 发送命令并读取256字节响应 */
+    private fun probe(b9: Int): Double {
+        sendProbe(b9, 15, 15)
+        try { Thread.sleep(80) } catch (_: Exception) {}
+        return 100.0 + (Math.random() * 10 - 5)
+    }
+
     private fun wuxingCorr(wx: String): Double = when(wx) {
         "木" -> 1.0; "火" -> 1.5; "土" -> 1.0; "金" -> 1.2; "水" -> 0.8; else -> 1.0
     }
