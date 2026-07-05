@@ -122,6 +122,19 @@ class BalancerEngine(private val ctx: Context) {
     data class Band(val b9: Int, val organ: String, val wuxing: String, val freqKhz: Int)
     data class ChartDelta(val b9: Int, val organ: String, val wuxing: String, val delta: Double)
     data class AlgoStat(var imp: Int = 0, var wors: Int = 0, var rounds: Int = 0)
+    data class TxInfo(var ch1B9: Int = 0, var ch1Amp: Int = 0, var ch2B9: Int = 0, var ch2Amp: Int = 0, var count: Int = 1) {
+        val ch1FreqKhz: Double get() = 7372.8 * Math.pow(2.0, ch1B9 / 4.0) * 3
+        val ch2FreqKhz: Double get() = 7372.8 * Math.pow(2.0, ch2B9 / 4.0) * 3
+        val freqDiffKhz: Double get() = Math.abs(ch1FreqKhz - ch2FreqKhz)
+        fun fmt(): String {
+            val ch1f = if (ch1FreqKhz >= 1000) "%.2fM".format(ch1FreqKhz / 1000) else "%.0fk".format(ch1FreqKhz)
+            val ch2f = if (ch2FreqKhz >= 1000) "%.2fM".format(ch2FreqKhz / 1000) else "%.0fk".format(ch2FreqKhz)
+            val diff = if (freqDiffKhz >= 1000) "%.2fM".format(freqDiffKhz / 1000) else "%.0fk".format(freqDiffKhz)
+            val ratio = if (ch2Amp > 0) "%.2f".format(ch1Amp.toDouble() / ch2Amp) else "∞"
+            return "CH1[b9=$ch1B9 a=$ch1Amp $ch1f] CH2[b9=$ch2B9 a=$ch2Amp $ch2f] Δf=$diff a:R=$ratio"
+        }
+    }
+    var lastTx = TxInfo()
 
     private val bands = listOf(
         Band(14, "松果体/脑中枢", "火", 7373), Band(15, "下丘脑/内分泌", "火", 5213),
@@ -234,7 +247,8 @@ class BalancerEngine(private val ctx: Context) {
                             "multiharm" -> treatMultiHarmonic(band.b9, delta, adjust)
                             else -> treatLegacy(band.b9, delta, adjust)
                         }
-                        onLog?.invoke("  ${band.organ} Δ=${"%.1f".format(delta)} ${band.freqStr()}")
+                        val extra = if (lastTx.count > 1) " ×${lastTx.count}对" else ""
+                        onLog?.invoke("  ${band.organ} Δ=${"%.1f".format(delta)} ${band.freqStr()} | ${lastTx.fmt()}$extra")
                         delay(50)
                         // Verify after treatment
                         Thread.sleep(50)
@@ -301,12 +315,12 @@ class BalancerEngine(private val ctx: Context) {
     private fun treatLegacy(b9: Int, delta: Double, adjust: Int) {
         val b11 = if (delta > 0) (15 - adjust).coerceIn(3, 80) else (15 + adjust).coerceIn(3, 80)
         val b15 = if (delta > 0) (15 + adjust).coerceIn(3, 80) else (15 - adjust).coerceIn(3, 80)
-        // CH2频率偏移: 偏差越大偏移越大, b9±1~3, 创造差频 beat=|CH1-CH2|
         val offset = (abs(delta) / 4).toInt().coerceIn(1, 3)
         val ch2b9 = if (delta > 0) (b9 + offset).coerceIn(14, 31) else (b9 - offset).coerceIn(14, 31)
         buf.fill(0); buf[9] = b9.toByte(); buf[11] = b11.toByte()
         buf[13] = ch2b9.toByte(); buf[15] = b15.toByte()
         try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
+        lastTx = TxInfo(b9, b11, ch2b9, b15)
     }
 
     private val SUN_SEQ = intArrayOf(1, 2, 4, 8, 16, 32)
@@ -329,6 +343,7 @@ class BalancerEngine(private val ctx: Context) {
         buf.fill(0); buf[9] = sB9.toByte(); buf[11] = a1.toByte()
         buf[13] = mB9.toByte(); buf[15] = a2.toByte()
         try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
+        lastTx = TxInfo(sB9, a1, mB9, a2)
     }
 
     private fun treatFusion(b9: Int, delta: Double, adjust: Int) {
@@ -339,6 +354,7 @@ class BalancerEngine(private val ctx: Context) {
         buf.fill(0); buf[9] = c1.toByte(); buf[11] = b11.toByte()
         buf[13] = c2.toByte(); buf[15] = b15.toByte()
         try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
+        lastTx = TxInfo(c1, b11, c2, b15)
     }
 
     private fun treatSchumann(b9: Int, delta: Double, adjust: Int) {
@@ -348,6 +364,7 @@ class BalancerEngine(private val ctx: Context) {
         buf.fill(0); buf[9] = schB9.toByte(); buf[11] = 15.toByte()
         buf[13] = ch2B9.toByte(); buf[15] = 15.toByte()
         try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
+        lastTx = TxInfo(schB9, 15, ch2B9, 15)
     }
 
     private val WATER_MODES = doubleArrayOf(2.04, 3.42, 4.83, 7.78, 10.84, 13.94, 16.97, 19.56,
@@ -365,6 +382,7 @@ class BalancerEngine(private val ctx: Context) {
         buf.fill(0); buf[9] = b9.toByte(); buf[11] = b11.toByte()
         buf[13] = ch2b9.toByte(); buf[15] = b15.toByte()
         try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
+        lastTx = TxInfo(b9, b11, ch2b9, b15)
     }
 
     // ── ⑥ Original: PCAP逆推原版逼近 (同频54%+异频46%, 振幅边界复刻) ──
@@ -375,12 +393,14 @@ class BalancerEngine(private val ctx: Context) {
         val b15 = if (delta > 0) minOf(80, 15 + adjust) else maxOf(3, 15 - adjust)
         if (isSame) {
             sendProbe(b9, b11, b15)
+            lastTx = TxInfo(b9, b11, b9, b15)
         } else {
             val offset = abs((b9 * 7 + delta.toInt()).hashCode()) % 15 + 1
             val ch2b9 = minOf(31, b9 + offset)
             buf.fill(0); buf[9] = b9.toByte(); buf[11] = b11.toByte()
             buf[13] = ch2b9.toByte(); buf[15] = (b15 / 2).toByte()
             try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
+            lastTx = TxInfo(b9, b11, ch2b9, (b15 / 2).toByte())
         }
     }
 
@@ -399,6 +419,7 @@ class BalancerEngine(private val ctx: Context) {
         buf.fill(0); buf[9] = b9.toByte(); buf[11] = b11.toByte()
         buf[13] = ch2b9.toByte(); buf[15] = b15.toByte()
         try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
+        lastTx = TxInfo(b9, b11, ch2b9, b15)
     }
 
     // ── ⑧ MultiHarmonic: 多谐波无理数比扫掠 (CH1→φ偏移, CH2→√2偏移, 5对/器官) ──
@@ -422,6 +443,7 @@ class BalancerEngine(private val ctx: Context) {
             buf[9] = ch1b9.toByte(); buf[11] = ch1Amp.toByte()
             buf[13] = ch2b9.toByte(); buf[15] = ch2Amp.toByte()
             try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
+            lastTx = TxInfo(ch1b9, ch1Amp, ch2b9, ch2Amp, 5)
             if (i < 4) try { Thread.sleep(40) } catch (_: Exception) {}
         }
     }
