@@ -48,14 +48,12 @@ class BalancerService : Service() {
         engine.onChart = { deltas, wx -> uiChart?.invoke(deltas, wx) }
         engine.onBatchReport = { n, s -> uiBatchReport?.invoke(n, s) }
         createNotificationChannel()
-    }
-
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(NOTIFY_ID, buildNotification("就绪"))  // 5秒内必须调用, 否则Android杀进程
-        return START_STICKY
+        startForeground(NOTIFY_ID, buildNotification("就绪"))
     }
 
     override fun onBind(intent: Intent?): IBinder = binder
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
 
     // MainActivity 在 engine.startBalance() 后调用这两个
     fun acquireWakeLock() {
@@ -79,18 +77,13 @@ class BalancerService : Service() {
     fun disconnect() {
         engine.disconnect()
         releaseWakeLock()
-        updateNotification("就绪")
+        stopForeground(STOP_FOREGROUND_REMOVE)
     }
 
     fun stop() {
         engine.stop()
         releaseWakeLock()
-        updateNotification("就绪")
-    }
-
-    private fun updateNotification(label: String) {
-        val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-        nm.notify(NOTIFY_ID, buildNotification(label))
+        stopForeground(STOP_FOREGROUND_REMOVE)
     }
 
     val isConnected get() = engine.isConnected
