@@ -228,11 +228,11 @@ class BalancerEngine(private val ctx: Context) {
                 val useAlgo = if (algoMode == "ab") {
                     if (algoQueue.isEmpty()) {
                         batchNum++
-                        algoQueue = mutableListOf("original", "legacy", "yinyang", "fusion", "schumann", "water", "jellium", "multiharm", "wuyin")
+                        algoQueue = mutableListOf("original", "legacy", "yinyang", "fusion", "schumann", "water", "jellium", "multiharm", "wuyin", "septet")
                         if (excludeOriginal) algoQueue.removeAll { it == "original" }
                         algoQueue.shuffle()
                         val labels = algoQueue.joinToString(" → ") {
-                            mapOf("original" to "🔗原版", "legacy" to "同频", "yinyang" to "☀☽7族",
+                            mapOf("original" to "🔗原版", "legacy" to "同频", "yinyang" to "☀☽",
                                 "fusion" to "融合", "schumann" to "舒曼", "water" to "水共振", "jellium" to "⚛幻数",
                                 "multiharm" to "🎵多谐波", "wuyin" to "🎵五音").getOrDefault(it, it)
                         }
@@ -241,7 +241,7 @@ class BalancerEngine(private val ctx: Context) {
                     algoQueue.removeAt(0)
                 } else algoMode
 
-                val label = mapOf("original" to "🔗原版", "legacy" to "同频反相", "yinyang" to "☀☽7族双频",
+                val label = mapOf("original" to "🔗原版", "legacy" to "同频反相", "yinyang" to "☀☽双频",
                     "fusion" to "⚡融合", "schumann" to "🌍舒曼锚", "water" to "💧水共振", "jellium" to "⚛幻数",
                     "multiharm" to "🎵多谐波", "wuyin" to "🎵五音")
                     .getOrDefault(useAlgo, useAlgo)
@@ -282,8 +282,10 @@ class BalancerEngine(private val ctx: Context) {
                             "jellium" -> treatJellium(band.b9, delta, adjust)
                             "multiharm" -> treatMultiHarmonic(band.b9, delta, adjust)
                             "wuyin" -> treatWuyin(band.b9, delta, adjust)
+                            "septet" -> treatSeptet(band.b9, delta, adjust)
                             else -> treatLegacy(band.b9, delta, adjust)
                         }
+                        AudioTone.play(band.b9, treatMs(50))  // 治疗音频反馈
                         val extra = if (lastTx.count > 1) " ×${lastTx.count}对" else ""
                         onLog?.invoke("  ${band.organ} Δ=${"%.1f".format(delta)} ${band.freqStr()} | ${lastTx.fmt()}$extra")
                         delay(treatMs(50))
@@ -312,7 +314,7 @@ class BalancerEngine(private val ctx: Context) {
                     for ((algo, st) in report) {
                         val total = st.imp + st.wors
                         val rate = if (total > 0) "${(st.imp * 100 / total).toInt()}%" else "--"
-                        val name = mapOf("original" to "🔗原版", "legacy" to "同频", "yinyang" to "☀☽7族",
+                        val name = mapOf("original" to "🔗原版", "legacy" to "同频", "yinyang" to "☀☽",
                             "fusion" to "融合", "schumann" to "舒曼", "water" to "水共振", "jellium" to "⚛幻数",
                             "multiharm" to "🎵多谐波", "wuyin" to "🎵五音")[algo] ?: algo
                         parts.add("$name $rate")
@@ -399,8 +401,22 @@ class BalancerEngine(private val ctx: Context) {
         val t = dS + dM; return if (t > 0) Pair(dM / t, dS / t) else Pair(0.5, 0.5)
     }
 
-    /** ☀☽7族混音双频 */
+    /** ☀☽双频 (原版2族) */
     private fun treatYinyang(b9: Int, delta: Double, adjust: Int) {
+        val base = cureBaseAmp(b9); val (wS, wM) = yinyangW(b9)
+        val sB9 = nearest(b9, SUN_SEQ); val mB9 = nearest(b9, MOON_SEQ)
+        val a1 = if (delta > 0) (base - adjust * wS).toInt().coerceIn(3, 172)
+                 else (base + adjust * wS).toInt().coerceIn(3, 172)
+        val a2 = if (delta > 0) (base + adjust * wM).toInt().coerceIn(3, 172)
+                 else (base - adjust * wM).toInt().coerceIn(3, 172)
+        buf.fill(0); buf[9] = sB9.toByte(); buf[11] = a1.toByte()
+        buf[13] = mB9.toByte(); buf[15] = a2.toByte()
+        try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
+        lastTx = TxInfo(sB9, a1, mB9, a2)
+    }
+
+    /** ☀☽7族混音双频 (新增算法: 7族M集内生序列加权) */
+    private fun treatSeptet(b9: Int, delta: Double, adjust: Int) {
         val base = cureBaseAmp(b9); val m = septetMix(b9); val ad = abs(adjust).toDouble()
         val a1 = if (delta > 0) (base - ad * m.ch1W).toInt().coerceIn(3, 172) else (base + ad * m.ch1W).toInt().coerceIn(3, 172)
         val a2 = if (delta > 0) (base + ad * m.ch2W).toInt().coerceIn(3, 172) else (base - ad * m.ch2W).toInt().coerceIn(3, 172)
