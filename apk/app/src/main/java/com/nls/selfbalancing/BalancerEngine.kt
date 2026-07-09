@@ -182,6 +182,7 @@ class BalancerEngine(private val ctx: Context) {
     )
 
     var algoMode: String = "ab"  // legacy / yinyang / fusion / schumann / water / ab
+    var excludeOriginal: Boolean = false  // 一键排除/包括 🔗原版 算法
     var treatSpeed: Float = 1f  // 治疗时间周期倍数 1~12
     private var algoQueue = mutableListOf<String>()
     private var batchNum = 0
@@ -228,6 +229,7 @@ class BalancerEngine(private val ctx: Context) {
                     if (algoQueue.isEmpty()) {
                         batchNum++
                         algoQueue = mutableListOf("original", "legacy", "yinyang", "fusion", "schumann", "water", "jellium", "multiharm", "wuyin")
+                        if (excludeOriginal) algoQueue.removeAll { it == "original" }
                         algoQueue.shuffle()
                         val labels = algoQueue.joinToString(" → ") {
                             mapOf("original" to "🔗原版", "legacy" to "同频", "yinyang" to "☀☽",

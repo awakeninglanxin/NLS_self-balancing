@@ -205,6 +205,21 @@
             android:layout_marginEnd="4dp" />
 
         <TextView
+            android:id="@+id/originalBtn"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="0.55"
+            android:text="🔗原版"
+            android:textColor="#fff"
+            android:textSize="11sp"
+            android:gravity="center"
+            android:padding="10dp"
+            android:background="#226644"
+            android:clickable="true"
+            android:focusable="true"
+            android:layout_marginEnd="4dp" />
+
+        <TextView
             android:id="@+id/stopBtn"
             android:layout_width="0dp"
             android:layout_height="wrap_content"

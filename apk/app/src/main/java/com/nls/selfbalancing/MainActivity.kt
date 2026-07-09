@@ -55,6 +55,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var connectBtn: TextView
     private lateinit var balanceBtn: TextView
     private lateinit var stopBtn: TextView
+    private lateinit var originalBtn: TextView
     private lateinit var roundText: TextView
     private lateinit var algoText: TextView
     private lateinit var progress: ProgressBar
@@ -126,6 +127,13 @@ class MainActivity : AppCompatActivity() {
         balanceBtn.setOnClickListener { onBalance() }
         stopBtn.setOnClickListener { service?.stop(); updateUI() }
 
+        // 一键排除/包括 🔗原版 算法
+        originalBtn.setOnClickListener {
+            val eng = ensureEngine() ?: return@setOnClickListener
+            eng.excludeOriginal = !eng.excludeOriginal
+            updateOriginalBtn()
+        }
+
         // Android 13+ 通知权限
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
             if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -154,6 +162,7 @@ class MainActivity : AppCompatActivity() {
         connectBtn = findViewById(R.id.connectBtn)
         balanceBtn = findViewById(R.id.balanceBtn)
         stopBtn = findViewById(R.id.stopBtn)
+        originalBtn = findViewById(R.id.originalBtn)
         roundText = findViewById(R.id.roundText)
         algoText = findViewById(R.id.algoText)
         progress = findViewById(R.id.progress)
@@ -258,6 +267,14 @@ class MainActivity : AppCompatActivity() {
         connectBtn.text = if (conn) "断开" else "连接"
         balanceBtn.text = if (eng?.isPlaying == true) "⏸ 停止" else "▶ 启动平衡"
         bgTip.visibility = if (eng?.isPlaying == true) View.VISIBLE else View.GONE
+        updateOriginalBtn()
+    }
+
+    private fun updateOriginalBtn() {
+        val eng = if (::engine.isInitialized) engine else null
+        val excl = eng?.excludeOriginal == true
+        originalBtn.text = if (excl) "🔗不包括" else "🔗原版"
+        originalBtn.setBackgroundColor(if (excl) 0xFF884444.toInt() else 0xFF226644.toInt())
     }
 
     private fun addLog(msg: String) {

@@ -231,7 +231,7 @@ class ChartView @JvmOverloads constructor(
 
             paint.textAlign = Paint.Align.CENTER
             paint.color = Color.parseColor("#00ff88"); paint.textSize = 20f
-            canvas.drawText("七维算法对比 (改善率)", w / 2, 20f, paint)
+            canvas.drawText("多维算法对比 (改善率)", w / 2, 20f, paint)
         } catch (e: Exception) {
             val w = width.toFloat(); val h = height.toFloat()
             paint.color = Color.parseColor("#ff4444"); paint.textSize = 24f
