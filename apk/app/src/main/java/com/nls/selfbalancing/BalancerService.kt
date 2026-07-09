@@ -48,12 +48,14 @@ class BalancerService : Service() {
         engine.onChart = { deltas, wx -> uiChart?.invoke(deltas, wx) }
         engine.onBatchReport = { n, s -> uiBatchReport?.invoke(n, s) }
         createNotificationChannel()
-        startForeground(NOTIFY_ID, buildNotification("就绪"))  // 必须在5秒内调用, 否则Android杀进程
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        startForeground(NOTIFY_ID, buildNotification("就绪"))  // 5秒内必须调用, 否则Android杀进程
+        return START_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder = binder
-
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
 
     // MainActivity 在 engine.startBalance() 后调用这两个
     fun acquireWakeLock() {
