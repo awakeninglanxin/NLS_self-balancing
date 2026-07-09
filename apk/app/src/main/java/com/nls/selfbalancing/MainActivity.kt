@@ -111,7 +111,7 @@ class MainActivity : AppCompatActivity() {
                 val bars = stats.mapNotNull { (key, s) ->
                     if (::engine.isInitialized && engine.excludeOriginal && key == "original") null
                     else {
-                    val name = mapOf("original" to "🔗原版", "legacy" to "同频反相", "yinyang" to "☀☽双频",
+                    val name = mapOf("original" to "🔗原版", "legacy" to "同频反相", "yinyang" to "☀☽7族双频",
                         "fusion" to "⚡融合", "schumann" to "🌍舒曼锚", "water" to "💧水共振", "jellium" to "⚛幻数",
                         "multiharm" to "🎵多谐波")[key] ?: key
                     ChartView.AlgoBar(key, name, s.imp, s.wors)
@@ -134,6 +134,7 @@ class MainActivity : AppCompatActivity() {
             val eng = ensureEngine() ?: return@setOnClickListener
             eng.excludeOriginal = !eng.excludeOriginal
             updateOriginalBtn()
+            addLog(if (eng.excludeOriginal) "⚠ 已排除原版算法" else "✅ 已恢复原版算法")
         }
 
         // Android 13+ 通知权限
@@ -276,7 +277,8 @@ class MainActivity : AppCompatActivity() {
         val eng = if (::engine.isInitialized) engine else null
         val excl = eng?.excludeOriginal == true
         originalBtn.text = if (excl) "🔗不包括" else "🔗原版"
-        originalBtn.setBackgroundColor(if (excl) 0xFF884444.toInt() else 0xFF226644.toInt())
+        originalBtn.text = if (excl) "✕ 已排除原版" else "🔗 包括原版"
+        originalBtn.setBackgroundColor(if (excl) 0xFFcc3333.toInt() else 0xFF226644.toInt())
     }
 
     private fun addLog(msg: String) {
