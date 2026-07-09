@@ -108,10 +108,8 @@ class MainActivity : AppCompatActivity() {
         }
         BalancerService.uiBatchReport = { batchNum, stats ->
             mainHandler.post {
-                val excl = ::engine.isInitialized && engine.excludeOriginal
-                val filtered = if (excl) stats.filterKeys { it != "original" } else stats
-                val bars = filtered.map { (key, s) ->
-                    val name = mapOf("original" to "🔗原版", "legacy" to "同频反相", "yinyang" to "☀☽7族双频",
+                val bars = stats.map { (key, s) ->
+                    val name = mapOf("original" to "🔗原版", "legacy" to "同频反相", "yinyang" to "☀☽双频",
                         "fusion" to "⚡融合", "schumann" to "🌍舒曼锚", "water" to "💧水共振", "jellium" to "⚛幻数",
                         "multiharm" to "🎵多谐波")[key] ?: key
                     ChartView.AlgoBar(key, name, s.imp, s.wors)
@@ -134,9 +132,6 @@ class MainActivity : AppCompatActivity() {
             val eng = ensureEngine() ?: return@setOnClickListener
             eng.excludeOriginal = !eng.excludeOriginal
             updateOriginalBtn()
-            val msg = if (eng.excludeOriginal) "⚠ 已排除原版算法 (后续轮次跳过🔗原版)" else "✅ 已恢复原版算法 (下次轮次包括🔗原版)"
-            addLog(msg)
-            Toast.makeText(this, if (eng.excludeOriginal) "已排除🔗原版" else "已恢复🔗原版", Toast.LENGTH_SHORT).show()
         }
 
         // Android 13+ 通知权限
@@ -278,9 +273,8 @@ class MainActivity : AppCompatActivity() {
     private fun updateOriginalBtn() {
         val eng = if (::engine.isInitialized) engine else null
         val excl = eng?.excludeOriginal == true
-        originalBtn.text = if (excl) "✕ 已排除原版" else "🔗 包括原版"
-        originalBtn.setBackgroundColor(Color.parseColor(if (excl) "#cc3333" else "#226644"))
-        originalBtn.setTextColor(Color.parseColor(if (excl) "#ffcccc" else "#ccffdd"))
+        originalBtn.text = if (excl) "🔗不包括" else "🔗原版"
+        originalBtn.setBackgroundColor(if (excl) 0xFF884444.toInt() else 0xFF226644.toInt())
     }
 
     private fun addLog(msg: String) {

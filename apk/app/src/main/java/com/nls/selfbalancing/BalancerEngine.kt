@@ -232,7 +232,7 @@ class BalancerEngine(private val ctx: Context) {
                         if (excludeOriginal) algoQueue.removeAll { it == "original" }
                         algoQueue.shuffle()
                         val labels = algoQueue.joinToString(" → ") {
-                            mapOf("original" to "🔗原版", "legacy" to "同频", "yinyang" to "☀☽7族",
+                            mapOf("original" to "🔗原版", "legacy" to "同频", "yinyang" to "☀☽",
                                 "fusion" to "融合", "schumann" to "舒曼", "water" to "水共振", "jellium" to "⚛幻数",
                                 "multiharm" to "🎵多谐波", "wuyin" to "🎵五音").getOrDefault(it, it)
                         }
@@ -241,7 +241,7 @@ class BalancerEngine(private val ctx: Context) {
                     algoQueue.removeAt(0)
                 } else algoMode
 
-                val label = mapOf("original" to "🔗原版", "legacy" to "同频反相", "yinyang" to "☀☽7族双频",
+                val label = mapOf("original" to "🔗原版", "legacy" to "同频反相", "yinyang" to "☀☽双频",
                     "fusion" to "⚡融合", "schumann" to "🌍舒曼锚", "water" to "💧水共振", "jellium" to "⚛幻数",
                     "multiharm" to "🎵多谐波", "wuyin" to "🎵五音")
                     .getOrDefault(useAlgo, useAlgo)
@@ -312,7 +312,7 @@ class BalancerEngine(private val ctx: Context) {
                     for ((algo, st) in report) {
                         val total = st.imp + st.wors
                         val rate = if (total > 0) "${(st.imp * 100 / total).toInt()}%" else "--"
-                        val name = mapOf("original" to "🔗原版", "legacy" to "同频", "yinyang" to "☀☽7族",
+                        val name = mapOf("original" to "🔗原版", "legacy" to "同频", "yinyang" to "☀☽",
                             "fusion" to "融合", "schumann" to "舒曼", "water" to "水共振", "jellium" to "⚛幻数",
                             "multiharm" to "🎵多谐波", "wuyin" to "🎵五音")[algo] ?: algo
                         parts.add("$name $rate")
@@ -367,92 +367,28 @@ class BalancerEngine(private val ctx: Context) {
         lastTx = TxInfo(b9, b11, ch2b9, b15)
     }
 
-    // ═══════ 7族M集内生序列 (全映射到b9空间 1~34) ═══════
-    // 4元组: 7族混音结果
-    private data class Quad(val ch1B9: Int, val ch1W: Double, val ch2B9: Int, val ch2W: Double)
-    // ① Feigenbaum 2^n → 周期倍增路 (阳·结构族)
-    private val F7_FEIGENBAUM = intArrayOf(1, 2, 4, 8, 16, 32)
-    // ② Fibonacci → 黄金球泡序 (阴·生命族)
-    private val F7_FIBONACCI = intArrayOf(1, 1, 2, 3, 5, 8, 13, 21, 34)
-    // ③ Sharkovsky 序 → "混沌之路"(奇→2·奇→4·奇→…→2^n)
-    private val F7_SHARKOVSKY = intArrayOf(3, 5, 7, 9, 11, 13, 15, 6, 10, 14, 18, 22, 26, 30, 12, 20, 28, 16, 32)
-    // ④ Farey 分母 → 主心形外围泡 (p/q→周期q泡中心)
-    private val F7_FAREY = intArrayOf(2, 3, 3, 4, 5, 4, 5, 6, 5, 6, 7, 7, 8, 9, 10, 11)
-    // ⑤ Kneading 素数 → 临界轨道拓扑 (M集内部精细结构)
-    private val F7_KNEADING = intArrayOf(2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31)
-    // ⑥ Misiurewicz preperiod → 分叉终结点 (external ray交点)
-    private val F7_MISIUREWICZ = intArrayOf(4, 6, 9, 14, 21, 25, 30)
-    // ⑦ Internal Address → 泡嵌入层级 (1→n→...层级路径)
-    private val F7_INTERNAL = intArrayOf(1, 3, 5, 7, 9, 13, 17, 21, 25, 29)
-
-    private val F7_ALL = arrayOf(F7_FEIGENBAUM, F7_FIBONACCI, F7_SHARKOVSKY,
-        F7_FAREY, F7_KNEADING, F7_MISIUREWICZ, F7_INTERNAL)
-    private val F7_NAMES = arrayOf("Feigenbaum","Fibonacci","Sharkovsky","Farey","Kneading","Misiurewicz","InternalAddr")
-    // CH1=结构族(0-2)  CH2=动力族(3-6) → 阴阳对偶: 宏观结构↔微观涨落
-
-    // 保留旧名兼容, 但内部用7族
-    private val SUN_SEQ = F7_FEIGENBAUM
-    private val MOON_SEQ = F7_FIBONACCI
+    private val SUN_SEQ = intArrayOf(1, 2, 4, 8, 16, 32)
+    private val MOON_SEQ = intArrayOf(1, 1, 2, 3, 5, 8, 13, 21, 34)
 
     private fun nearest(b9: Int, seq: IntArray) = seq.minByOrNull { abs(b9 - it) } ?: b9
-
-    /** 7族全频率混音: 返回 (CH1频率b9, CH1振幅权重, CH2频率b9, CH2振幅权重) */
-    private fun septetMix(b9: Int): Quad {
-        // 计算7族中各族的共振距离(越小=越共振)
-        val dists = DoubleArray(7) { F7_ALL[it].minOf { v -> abs(b9 - v) }.toDouble() }
-        val total = dists.sum()
-        val w = if (total > 0) dists.map { 1.0 - it / (it + 4.0) } else DoubleArray(7) { 1.0 }  // 柔和加权
-
-        // CH1 结构族加权平均 (Feigenbaum + Fibonacci + Sharkovsky)
-        val wCH1 = w[0] + w[1] + w[2]
-        val ch1B9 = if (wCH1 > 1e-6) {
-            (nearest(b9, F7_FEIGENBAUM) * w[0] + nearest(b9, F7_FIBONACCI) * w[1] +
-             nearest(b9, F7_SHARKOVSKY) * w[2]) / wCH1
-        } else b9.toDouble()
-
-        // CH2 动力族加权平均 (Farey + Kneading + Misiurewicz + InternalAddr)
-        val wCH2 = w[3] + w[4] + w[5] + w[6]
-        val ch2B9 = if (wCH2 > 1e-6) {
-            (nearest(b9, F7_FAREY) * w[3] + nearest(b9, F7_KNEADING) * w[4] +
-             nearest(b9, F7_MISIUREWICZ) * w[5] + nearest(b9, F7_INTERNAL) * w[6]) / wCH2
-        } else b9.toDouble()
-
-        // 振幅权重: 结构族总共振→CH1振幅 / 动力族总共振→CH2振幅
-        val totalW = w.sum()
-        return Quad(
-            ch1B9.toInt().coerceIn(14, 31),  // CH1 b9
-            (wCH1 / totalW * 1.5).coerceIn(0.3, 1.5),       // CH1 振幅因子
-            ch2B9.toInt().coerceIn(14, 31),  // CH2 b9
-            (wCH2 / totalW * 1.5).coerceIn(0.3, 1.5)        // CH2 振幅因子
-        )
-    }
-
-    /** 7族加权距离(用于yinyangW兼容) */
     private fun yinyangW(b9: Int): Pair<Double, Double> {
         val dS = SUN_SEQ.minOf { abs(b9 - it) }.toDouble()
         val dM = MOON_SEQ.minOf { abs(b9 - it) }.toDouble()
-        val dSum = distSum(b9)  // 全7族
-        val t = dS + dM + dSum * 0.3; return if (t > 0) Pair(dM / t, dS / t) else Pair(0.5, 0.5)
+        val t = dS + dM; return if (t > 0) Pair(dM / t, dS / t) else Pair(0.5, 0.5)
     }
-    private fun distSum(b9: Int): Double = F7_ALL.sumOf { f -> f.minOf { v -> abs(b9 - v) } }.toDouble()
 
-    /** ☀☽ 7族混音双频 (优化版 treatYinyang) */
     private fun treatYinyang(b9: Int, delta: Double, adjust: Int) {
         val base = cureBaseAmp(b9)
-        val mix = septetMix(b9)
-        val absAdj = abs(adjust).toDouble()
-
-        // CH1: 结构族(fold) — 宏观骨架, 振幅随delta方向偏移
-        val a1 = if (delta > 0) (base - absAdj * mix.ch1W).toInt().coerceIn(3, 172)
-                 else (base + absAdj * mix.ch1W).toInt().coerceIn(3, 172)
-        // CH2: 动力族(unfold) — 微观涨落, 振幅反向补偿
-        val a2 = if (delta > 0) (base + absAdj * mix.ch2W).toInt().coerceIn(3, 172)
-                 else (base - absAdj * mix.ch2W).toInt().coerceIn(3, 172)
-
-        buf.fill(0); buf[9] = mix.ch1B9.toByte(); buf[11] = a1.toByte()
-        buf[13] = mix.ch2B9.toByte(); buf[15] = a2.toByte()
+        val (wS, wM) = yinyangW(b9)
+        val sB9 = nearest(b9, SUN_SEQ); val mB9 = nearest(b9, MOON_SEQ)
+        val a1 = if (delta > 0) (base - adjust * wS).toInt().coerceIn(3, 172)
+                 else (base + adjust * wS).toInt().coerceIn(3, 172)
+        val a2 = if (delta > 0) (base + adjust * wM).toInt().coerceIn(3, 172)
+                 else (base - adjust * wM).toInt().coerceIn(3, 172)
+        buf.fill(0); buf[9] = sB9.toByte(); buf[11] = a1.toByte()
+        buf[13] = mB9.toByte(); buf[15] = a2.toByte()
         try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
-        lastTx = TxInfo(mix.ch1B9, a1, mix.ch2B9, a2)
+        lastTx = TxInfo(sB9, a1, mB9, a2)
     }
 
     private fun treatFusion(b9: Int, delta: Double, adjust: Int) {
