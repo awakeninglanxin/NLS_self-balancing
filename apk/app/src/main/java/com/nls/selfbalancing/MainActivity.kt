@@ -279,8 +279,8 @@ class MainActivity : AppCompatActivity() {
         val eng = if (::engine.isInitialized) engine else null
         val excl = eng?.excludeOriginal == true
         originalBtn.text = if (excl) "✕ 已排除原版" else "🔗 包括原版"
-        originalBtn.setBackgroundColor(if (excl) 0xFFcc3333.toInt() else 0xFF226644.toInt())
-        originalBtn.setTextColor(if (excl) 0xFFffcccc.toInt() else 0xFFccffdd.toInt())
+        originalBtn.setBackgroundColor(Color.parseColor(if (excl) "#cc3333" else "#226644"))
+        originalBtn.setTextColor(Color.parseColor(if (excl) "#ffcccc" else "#ccffdd"))
     }
 
     private fun addLog(msg: String) {
