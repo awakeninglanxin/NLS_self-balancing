@@ -397,7 +397,7 @@ class BalancerEngine(private val ctx: Context) {
     private fun nearest(b9: Int, seq: IntArray) = seq.minByOrNull { abs(b9 - it) } ?: b9
 
     /** 7族全频率混音: 返回 (CH1频率b9, CH1振幅权重, CH2频率b9, CH2振幅权重) */
-    private fun septetMix(b9: Int): Quad<Int, Double, Int, Double> {
+    private fun septetMix(b9: Int): Quad {
         // 计算7族中各族的共振距离(越小=越共振)
         val dists = DoubleArray(7) { F7_ALL[it].minOf { v -> abs(b9 - v) }.toDouble() }
         val total = dists.sum()
