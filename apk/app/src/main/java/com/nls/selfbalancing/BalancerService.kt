@@ -48,7 +48,6 @@ class BalancerService : Service() {
         engine.onChart = { deltas, wx -> uiChart?.invoke(deltas, wx) }
         engine.onBatchReport = { n, s -> uiBatchReport?.invoke(n, s) }
         createNotificationChannel()
-        startForeground(NOTIFY_ID, buildNotification("就绪"))
     }
 
     override fun onBind(intent: Intent?): IBinder = binder
