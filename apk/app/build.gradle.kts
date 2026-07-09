@@ -18,16 +18,6 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("release")
-        }
-    }
-
-    signingConfigs {
-        create("release") {
-            storeFile = file("../nls-release.p12")
-            storePassword = System.getenv("KEYSTORE_PASS") ?: "nls2025"
-            keyAlias = "nls-key"
-            keyPassword = System.getenv("KEYSTORE_PASS") ?: "nls2025"
         }
     }
 
