@@ -1,15 +1,23 @@
 package com.nls.selfbalancing
 
+import android.Manifest
 import android.app.AlertDialog
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Bundle
 import android.os.Handler
+import android.os.IBinder
 import android.os.Looper
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import java.io.File
 import java.io.PrintWriter
@@ -18,6 +26,21 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 class MainActivity : AppCompatActivity() {
+
+    // Service 绑定
+    private var service: BalancerService? = null
+    private var bound = false
+    private val connection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+            service = (binder as BalancerService.LocalBinder).getService()
+            bound = true
+            updateUI()
+        }
+        override fun onServiceDisconnected(name: ComponentName?) {
+            service = null; bound = false; updateUI()
+        }
+    }
+
     private lateinit var engine: BalancerEngine
     private val mainHandler = Handler(Looper.getMainLooper())
     private var chartView: ChartView? = null
@@ -35,6 +58,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var roundText: TextView
     private lateinit var algoText: TextView
     private lateinit var progress: ProgressBar
+    private lateinit var bgTip: TextView
     private lateinit var logContainer: LinearLayout
     private lateinit var tabHost: LinearLayout
     private val logHistory = mutableListOf<String>()
@@ -57,20 +81,69 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        engine = BalancerEngine(this)
-        engine.initialize()
+        // 启动+绑定前台服务
+        val intent = Intent(this, BalancerService::class.java)
+        ContextCompat.startForegroundService(this, intent)
+        bindService(intent, connection, Context.BIND_AUTO_CREATE)
 
         bindViews()
         buildTabHost()
-        setupCallbacks()
+
+        // 桥接 Service 状态回调
+        BalancerService.uiRound = { r -> mainHandler.post { roundText.text = "第${r}轮" } }
+        BalancerService.uiStatus = { s -> mainHandler.post { algoText.text = s } }
+        BalancerService.uiProgress = { cur, max ->
+            mainHandler.post { progress.progress = cur; progress.max = max }
+        }
+        BalancerService.uiLog = { msg -> mainHandler.post { addLog(msg) } }
+        BalancerService.uiChart = { deltas, wuxing ->
+            mainHandler.post {
+                chartView?.let { cv ->
+                    cv.deltaData = deltas.map { ChartView.BandDelta(it.b9, it.organ, it.wuxing, it.delta) }
+                    cv.wuxingData = wuxing
+                    cv.invalidate()
+                }
+            }
+        }
+        BalancerService.uiBatchReport = { batchNum, stats ->
+            mainHandler.post {
+                val bars = stats.map { (key, s) ->
+                    val name = mapOf("original" to "🔗原版", "legacy" to "同频反相", "yinyang" to "☀☽双频",
+                        "fusion" to "⚡融合", "schumann" to "🌍舒曼锚", "water" to "💧水共振", "jellium" to "⚛幻数",
+                        "multiharm" to "🎵多谐波")[key] ?: key
+                    ChartView.AlgoBar(key, name, s.imp, s.wors)
+                }.sortedByDescending { val t = it.imp + it.wors; if (t > 0) it.imp.toDouble() / t else 0.0 }
+                chartView?.let { cv ->
+                    cv.algoCompareData = bars
+                    cv.invalidate()
+                }
+            }
+        }
 
         connectBtn.setOnClickListener { onConnect() }
         calBtn.setOnClickListener { onCalibrate() }
         exportBtn.setOnClickListener { onExport() }
         balanceBtn.setOnClickListener { onBalance() }
-        stopBtn.setOnClickListener { engine.stop(); updateUI() }
+        stopBtn.setOnClickListener { service?.stop(); updateUI() }
 
-        updateUI()
+        // Android 13+ 通知权限
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 100)
+            }
+        }
+    }
+
+    /**
+     * 延迟初始化: 等待 Service 绑定完成（首个回调调用时 engine 已就绪）
+     */
+    private fun ensureEngine(): BalancerEngine? {
+        val svc = service ?: return null
+        if (!::engine.isInitialized) {
+            engine = svc.engine
+            engine.initialize()
+        }
+        return engine
     }
 
     private fun bindViews() {
@@ -84,15 +157,15 @@ class MainActivity : AppCompatActivity() {
         roundText = findViewById(R.id.roundText)
         algoText = findViewById(R.id.algoText)
         progress = findViewById(R.id.progress)
+        bgTip = findViewById(R.id.bgTip)
         logContainer = findViewById(R.id.logContainer)
         tabHost = findViewById(R.id.tabHost)
 
-        // Treatment speed slider
         val speedSlider = findViewById<SeekBar>(R.id.speedSlider)
         val speedLabel = findViewById<TextView>(R.id.speedLabel)
         speedSlider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(s: SeekBar, v: Int, fromUser: Boolean) {
-                engine.treatSpeed = (v + 1).toFloat()
+                ensureEngine()?.let { it.treatSpeed = (v + 1).toFloat() }
                 speedLabel.text = "×${v + 1}"
             }
             override fun onStartTrackingTouch(s: SeekBar?) {}
@@ -102,8 +175,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun buildTabHost() {
         val ctx = this
-
-        // Tab row — only 2 tabs
         val tabRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER
             setPadding(0, 2, 0, 2)
@@ -125,7 +196,6 @@ class MainActivity : AppCompatActivity() {
         tabRow.addView(tabRidge)
         tabRow.addView(tabCompare)
 
-        // Chart area
         val chartFrame = FrameLayout(ctx).apply {
             setBackgroundColor(Color.parseColor("#0d0d1a"))
             layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
@@ -136,7 +206,6 @@ class MainActivity : AppCompatActivity() {
                 ViewGroup.LayoutParams.MATCH_PARENT)
         }
         chartFrame.addView(chartView)
-
         tabHost.addView(tabRow)
         tabHost.addView(chartFrame)
         switchTab(ChartView.Mode.RIDGE)
@@ -150,65 +219,45 @@ class MainActivity : AppCompatActivity() {
         tabCompare?.setTextColor(if (mode == ChartView.Mode.ALGO_COMPARE) active else inactive)
     }
 
-    private fun setupCallbacks() {
-        engine.onRound = { r -> mainHandler.post { roundText.text = "第${r}轮" } }
-        engine.onStatus = { s -> mainHandler.post { algoText.text = s } }
-        engine.onProgress = { cur, max ->
-            mainHandler.post { progress.progress = cur; progress.max = max }
-        }
-        engine.onLog = { msg -> mainHandler.post { addLog(msg) } }
-        engine.onChart = { deltas, wuxing ->
-            mainHandler.post {
-                chartView?.let { cv ->
-                    cv.deltaData = deltas.map { ChartView.BandDelta(it.b9, it.organ, it.wuxing, it.delta) }
-                    cv.wuxingData = wuxing
-                    cv.invalidate()
-                }
-            }
-        }
-        engine.onBatchReport = { batchNum, stats ->
-            mainHandler.post {
-                val bars = stats.map { (key, s) ->
-                    val name = mapOf("original" to "🔗原版", "legacy" to "同频反相", "yinyang" to "☀☽双频",
-                        "fusion" to "⚡融合", "schumann" to "🌍舒曼锚", "water" to "💧水共振", "jellium" to "⚛幻数",
-                        "multiharm" to "🎵多谐波")[key] ?: key
-                    ChartView.AlgoBar(key, name, s.imp, s.wors)
-                }.sortedByDescending { val t = it.imp + it.wors; if (t > 0) it.imp.toDouble() / t else 0.0 }
-                chartView?.let { cv ->
-                    cv.algoCompareData = bars
-                    cv.invalidate()
-                }
-            }
-        }
-    }
-
     private fun onConnect() {
-        if (engine.isConnected) { engine.disconnect(); updateUI(); return }
+        val svc = service ?: return
+        if (svc.isConnected) { svc.disconnect(); updateUI(); return }
         connectBtn.isEnabled = false; connectBtn.text = "…"
-        engine.connect { ok, msg -> mainHandler.post { addLog(msg); updateUI() } }
+        svc.connect { ok, msg -> mainHandler.post { addLog(msg); updateUI() } }
     }
 
     private fun onCalibrate() {
-        if (!engine.isConnected) { addLog("⚠ 请先连接手环"); return }
+        val eng = ensureEngine() ?: return
+        if (!eng.isConnected) { addLog("⚠ 请先连接手环"); return }
         calBtn.isEnabled = false; calBtn.text = "校准中…"
         addLog("📐 校准中…传感器请悬空")
-        engine.calibrate { ok, msg ->
+        eng.calibrate { ok, msg ->
             mainHandler.post { addLog(msg); calBtn.isEnabled = true; calBtn.text = "📐 校准"; updateUI() }
         }
     }
 
     private fun onBalance() {
-        if (engine.isPlaying) { engine.stop(); updateUI(); return }
-        engine.startBalance(); updateUI()
+        val svc = service ?: return
+        val eng = ensureEngine() ?: return
+        if (eng.isPlaying) { svc.stop(); updateUI(); return }
+        // 通过 engine 启动平衡（service 管理 WakeLock）
+        eng.startBalance()
+        // 平衡启动后获取 WakeLock + 前台通知
+        svc.acquireWakeLock()
+        svc.startForegroundSafe("动态平衡")
+        updateUI()
     }
 
     private fun updateUI() {
-        val conn = engine.isConnected
+        val svc = service
+        val eng = if (::engine.isInitialized) engine else null
+        val conn = svc?.isConnected == true
         statusDot.setBackgroundResource(if (conn) android.R.color.holo_green_light else android.R.color.darker_gray)
         statusText.text = if (conn) "手环已连接" else "未连接"
         connectBtn.isEnabled = true
         connectBtn.text = if (conn) "断开" else "连接"
-        balanceBtn.text = if (engine.isPlaying) "⏸ 停止" else "▶ 启动平衡"
+        balanceBtn.text = if (eng?.isPlaying == true) "⏸ 停止" else "▶ 启动平衡"
+        bgTip.visibility = if (eng?.isPlaying == true) View.VISIBLE else View.GONE
     }
 
     private fun addLog(msg: String) {
@@ -231,13 +280,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun onExport() {
         try {
-            // Wait for any pending UI log updates to flush
             Thread.sleep(200)
             val sdf = SimpleDateFormat("yyyy-MM-dd_HH-mm", Locale.getDefault())
             val filename = "NLS_Balance_${sdf.format(Date())}.txt"
             val dir = getExternalFilesDir(null) ?: filesDir
             val file = File(dir, filename)
-            val lines = logHistory.toList()  // snapshot
+            val lines = logHistory.toList()
             PrintWriter(file).use { pw ->
                 pw.println("NLS 动态平衡仪 — 完整日志导出")
                 pw.println("时间: ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())}")
@@ -254,5 +302,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    override fun onDestroy() { engine.destroy(); super.onDestroy() }
+    override fun onDestroy() {
+        unbindService(connection)
+        super.onDestroy()
+    }
 }

@@ -219,4 +219,12 @@
             android:focusable="true"
             android:layout_marginStart="4dp" />
     </LinearLayout>
+
+    <!-- 后台保活提示 -->
+    <TextView android:id="@+id/bgTip" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:gravity="center"
+        android:text="🔋 已在后台保活 · 息屏不断电"
+        android:textColor="#2fd39a" android:textSize="13sp"
+        android:visibility="gone" android:layout_marginTop="4dp"/>
+
 </LinearLayout>
