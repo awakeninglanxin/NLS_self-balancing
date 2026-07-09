@@ -30,8 +30,8 @@ class BalancerService : Service() {
         var uiStatus: ((String) -> Unit)? = null
         var uiProgress: ((Int, Int) -> Unit)? = null
         var uiLog: ((String) -> Unit)? = null
-        var uiChart: ((List<ChartDelta>, Map<String, Double>) -> Unit)? = null
-        var uiBatchReport: ((Int, Map<String, AlgoStat>) -> Unit)? = null
+        var uiChart: ((List<BalancerEngine.ChartDelta>, Map<String, Double>) -> Unit)? = null
+        var uiBatchReport: ((Int, Map<String, BalancerEngine.AlgoStat>) -> Unit)? = null
     }
 
     inner class LocalBinder : Binder() {
