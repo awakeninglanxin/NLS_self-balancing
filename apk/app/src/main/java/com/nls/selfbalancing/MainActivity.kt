@@ -109,7 +109,7 @@ class MainActivity : AppCompatActivity() {
         BalancerService.uiBatchReport = { batchNum, stats ->
             mainHandler.post {
                 val bars = stats.map { (key, s) ->
-                    val name = mapOf("original" to "🔗原版", "legacy" to "同频反相", "yinyang" to "☀☽双频",
+                    val name = mapOf("original" to "🔗原版", "legacy" to "同频反相", "yinyang" to "☀☽7族双频",
                         "fusion" to "⚡融合", "schumann" to "🌍舒曼锚", "water" to "💧水共振", "jellium" to "⚛幻数",
                         "multiharm" to "🎵多谐波")[key] ?: key
                     ChartView.AlgoBar(key, name, s.imp, s.wors)
