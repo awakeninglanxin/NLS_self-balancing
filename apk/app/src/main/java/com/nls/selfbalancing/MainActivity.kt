@@ -109,7 +109,7 @@ class MainActivity : AppCompatActivity() {
         BalancerService.uiBatchReport = { batchNum, stats ->
             mainHandler.post {
                 val excl = ::engine.isInitialized && engine.excludeOriginal
-                val filtered = if (excl) stats.filter { it.key != "original" } else stats
+                val filtered = if (excl) stats.filterKeys { it != "original" } else stats
                 val bars = filtered.map { (key, s) ->
                     val name = mapOf("original" to "🔗原版", "legacy" to "同频反相", "yinyang" to "☀☽7族双频",
                         "fusion" to "⚡融合", "schumann" to "🌍舒曼锚", "water" to "💧水共振", "jellium" to "⚛幻数",
