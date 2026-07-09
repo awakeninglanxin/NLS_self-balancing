@@ -209,7 +209,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="0.55"
-            android:text="🔗原版"
+            android:text="🔗 包括原版"
             android:textColor="#fff"
             android:textSize="11sp"
             android:gravity="center"
