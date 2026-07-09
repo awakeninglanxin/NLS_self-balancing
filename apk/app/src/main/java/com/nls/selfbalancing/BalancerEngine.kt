@@ -285,7 +285,7 @@ class BalancerEngine(private val ctx: Context) {
                             "septet" -> treatSeptet(band.b9, delta, adjust)
                             else -> treatLegacy(band.b9, delta, adjust)
                         }
-                        AudioTone.play(lastTx.ch1B9, lastTx.ch2B9, treatMs(80))  // 双声道治疗音频
+                        AudioTone.play(lastTx.ch1B9, lastTx.ch1Amp, lastTx.ch2B9, lastTx.ch2Amp, treatMs(80))  // 双声道+振幅比功率治疗音频
                         val extra = if (lastTx.count > 1) " ×${lastTx.count}对" else ""
                         onLog?.invoke("  ${band.organ} Δ=${"%.1f".format(delta)} ${band.freqStr()} | ${lastTx.fmt()}$extra")
                         delay(treatMs(50))
