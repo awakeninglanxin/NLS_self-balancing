@@ -22,12 +22,12 @@ jobs:
           # Create gradlew script
           printf '#!/bin/sh\nDIRNAME=$(dirname "$0")\nAPP_HOME=$(cd "$DIRNAME" && pwd -P)\nCLASSPATH=$APP_HOME/gradle/wrapper/gradle-wrapper.jar\nexec java -classpath "$CLASSPATH" org.gradle.wrapper.GradleWrapperMain "$@"\n' > apk/gradlew
           chmod +x apk/gradlew
-      - name: Build (Release Signed)
+      - name: Build
         run: |
           cd apk
           VERSION=$(grep versionName app/build.gradle.kts | grep -oP 'v\K[0-9.]+' | head -1)
           [ -z "$VERSION" ] && VERSION="7.0"
-          ./gradlew assembleRelease --no-daemon
+          ./gradlew assembleDebug --no-daemon
           mkdir -p build
           find app/build -name "*.apk" -exec cp {} build/nls_balance_v${VERSION}.apk \; -quit
       - name: Upload

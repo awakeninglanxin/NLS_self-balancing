@@ -13,9 +13,6 @@ import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 
-/**
- * 前台服务：持有 BalancerEngine + WakeLock，确保息屏后 USB 手环不断电
- */
 class BalancerService : Service() {
 
     lateinit var engine: BalancerEngine
@@ -25,7 +22,6 @@ class BalancerService : Service() {
     companion object {
         const val CHANNEL_ID = "balancer_foreground"
         const val NOTIFY_ID = 1
-
         var uiRound: ((Int) -> Unit)? = null
         var uiStatus: ((String) -> Unit)? = null
         var uiProgress: ((Int, Int) -> Unit)? = null
@@ -52,9 +48,11 @@ class BalancerService : Service() {
 
     override fun onBind(intent: Intent?): IBinder = binder
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        startForeground(NOTIFY_ID, buildNotification("就绪"))
+        return START_STICKY
+    }
 
-    // MainActivity 在 engine.startBalance() 后调用这两个
     fun acquireWakeLock() {
         if (wakeLock != null) return
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -86,8 +84,6 @@ class BalancerService : Service() {
     }
 
     val isConnected get() = engine.isConnected
-
-    // ── 通知 ──
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
