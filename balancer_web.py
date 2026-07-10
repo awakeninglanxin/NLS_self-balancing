@@ -195,25 +195,22 @@ class Balancer:
     # ── 音频反馈 (432Hz调律, 仿AudioTone) ──
     @staticmethod
     def _b9tohz(b9):
+        """b9→可听频率: 7.3728MHz逐半频→27~6912Hz(8个八度)"""
         hz = 7372800.0 / 2**((b9 - 14) / 2)
         while hz > 6912: hz /= 2
         while hz < 27: hz *= 2
-        # 432Hz五声音阶量化
-        a4, pent = 432.0, [0, 2, 4, 7, 9]
-        semi = 12 * math.log2(hz / a4)
-        octv = int(semi) // 12
-        best = a4 * 2**octv
-        for d in pent:
-            f = a4 * 2**((octv * 12 + d) / 12)
-            if abs(f - hz) < abs(best - hz): best = f
-        return int(best)
+        return int(hz)
 
     def _audio_beep(self, ch1_b9, ch2_b9, ms=80):
-        """Windows蜂鸣: CH1→左(CH1频率), 短促提示音"""
+        """Windows蜂鸣: CH1短音+CH2短音, 形成双音差拍辨识"""
         try:
-            hz = self._b9tohz(ch1_b9)
-            if 37 <= hz <= 32767:
-                winsound.Beep(int(hz), int(ms))
+            hz1 = self._b9tohz(ch1_b9)
+            hz2 = self._b9tohz(ch2_b9)
+            if 37 <= hz1 <= 32767:
+                winsound.Beep(int(hz1), int(ms))
+                time.sleep(0.04)
+                if 37 <= hz2 <= 32767 and abs(hz2 - hz1) > 10:
+                    winsound.Beep(int(hz2), int(ms * 0.6))
         except: pass
 
     def scan(self, update_coupling=True):
