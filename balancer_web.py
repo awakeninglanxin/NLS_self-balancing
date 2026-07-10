@@ -3,7 +3,7 @@ NLS Self-Balancing Web v2.0 — 经络实时平衡仪 + Web仪表盘
 启动: python balancer_web.py → 浏览器打开 http://localhost:8080
 修复: loop异常处理 + 器官名称实时显示 + 改善/恶化详情
 """
-import serial, struct, time, math, json, os, threading, traceback, random
+import serial, struct, time, math, json, os, threading, traceback, random, winsound
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 
@@ -191,6 +191,30 @@ class Balancer:
                 except: pass
                 self.ser = None
         return False
+
+    # ── 音频反馈 (432Hz调律, 仿AudioTone) ──
+    @staticmethod
+    def _b9tohz(b9):
+        hz = 7372800.0 / 2**((b9 - 14) / 2)
+        while hz > 6912: hz /= 2
+        while hz < 27: hz *= 2
+        # 432Hz五声音阶量化
+        a4, pent = 432.0, [0, 2, 4, 7, 9]
+        semi = 12 * math.log2(hz / a4)
+        octv = int(semi) // 12
+        best = a4 * 2**octv
+        for d in pent:
+            f = a4 * 2**((octv * 12 + d) / 12)
+            if abs(f - hz) < abs(best - hz): best = f
+        return int(best)
+
+    def _audio_beep(self, ch1_b9, ch2_b9, ms=80):
+        """Windows蜂鸣: CH1→左(CH1频率), 短促提示音"""
+        try:
+            hz = self._b9tohz(ch1_b9)
+            if 37 <= hz <= 32767:
+                winsound.Beep(int(hz), int(ms))
+        except: pass
 
     def scan(self, update_coupling=True):
         """扫描全部18频段，实时更新UI"""
@@ -956,6 +980,17 @@ class Balancer:
                         balanced = self.balance_legacy(deltas)
 
                     self.add_log(f"  🔊 已治 {len(balanced)}项")
+                    # 音频反馈: 用第一个治疗项的CH1频率
+                    if balanced:
+                        self._audio_beep(balanced[0].get("ch1b9", balanced[0].get("b9", 20)), 
+                                        balanced[0].get("ch2b9", balanced[0].get("b9", 20)), 100)
+                    # 断连检测: 治疗过程中串口丢失则停止
+                    if not self.ser or not self.ser.is_open:
+                        self.running = False
+                        self.add_log("⚠ 手环已断开！请重新连接后校准")
+                        self.status["playing"] = False
+                        self.status["connected"] = False
+                        break
                     # 详细CH1/CH2日志
                     for item in balanced:
                         ch1b9 = item.get("ch1b9", item.get("b9", "?"))
