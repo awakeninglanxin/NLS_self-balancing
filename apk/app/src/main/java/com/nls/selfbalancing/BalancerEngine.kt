@@ -503,7 +503,7 @@ class BalancerEngine(private val ctx: Context) {
             sendProbe(b9, b11, b15)
             lastTx = TxInfo(b9, b11, b9, b15)
         } else {
-            val offset = abs((b9 * 7 + delta.toInt()).hashCode()) % 15 + 1
+            val offset = (abs(delta) / 3).toInt().coerceIn(1, 15)  // 异频偏移正比|delta|
             val ch2b9 = minOf(31, b9 + offset)
             buf.fill(0); buf[9] = b9.toByte(); buf[11] = b11.toByte()
             buf[13] = ch2b9.toByte(); buf[15] = minOf(172, b15).toByte()
