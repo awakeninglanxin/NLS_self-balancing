@@ -496,7 +496,7 @@ class BalancerEngine(private val ctx: Context) {
     private fun treatOriginal(b9: Int, delta: Double, adjust: Int) {
         val base = cureBaseAmp(b9)
         val samePct = 54
-        val isSame = (abs(b9.hashCode()) % 100) < samePct
+        val isSame = (abs(b9 * 7 + delta.toInt()) % 100) < samePct
         val b11 = if (delta > 0) maxOf(3, base - adjust) else minOf(172, base + adjust)
         val b15 = if (delta > 0) minOf(172, base + adjust) else maxOf(3, base - adjust)
         if (isSame) {
