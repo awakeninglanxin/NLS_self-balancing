@@ -11,8 +11,10 @@ COM_PORT = "COM4"
 BASELINE_FILE = os.path.join(os.path.dirname(__file__), "nls_baseline.json")
 PHASE_FILE = os.path.join(os.path.dirname(__file__), "nls_phase.json")
 
-# 原版算法指纹（从PCAP逆推，换人→重新生成→重启即生效）
-from algo_fingerprint import FINGERPRINT
+# 原版算法指纹（多用户, 从PCAP逆推, 换人→重新生成→重启即生效）
+from algo_fingerprint import ALL_FINGERPRINTS, FINGERPRINT
+PERSONS = list(ALL_FINGERPRINTS.keys())  # ["丽梦儿", "蔡明琦", ...]
+CURRENT_PERSON = PERSONS[0] if PERSONS else "默认"  # 当前选中的人
 B9_RANGE = range(14, 32)  # 实际抓包范围 14~31，对应 7.37MHz~20.4kHz
 
 # ── Koldas 五大启发 ──
@@ -300,19 +302,9 @@ class Balancer:
             time.sleep(0.08)
         return balanced
 
-    def balance_original_hybrid(self, deltas):
-        """原版NLS逼近 — 从 algo_fingerprint.py 读取12维指纹
-        换人: python pcap_to_algo.py <新PCAP> → 重启
-        指纹: {person} {total}条 同频{same_pct}%/异频{diff_pct}% b9={b9_lo}-{b9_hi}
-        """.format(
-            person=FINGERPRINT.get("person", "?"),
-            total=FINGERPRINT.get("total_cmds", "?"),
-            same_pct=FINGERPRINT.get("same_pct", "?"),
-            diff_pct=100-FINGERPRINT.get("same_pct", 50),
-            b9_lo=FINGERPRINT.get("b9_lo", "?"),
-            b9_hi=FINGERPRINT.get("b9_hi", "?"),
-        )
-        fp = FINGERPRINT
+    def balance_original_hybrid(self, deltas, person=None):
+        """原版NLS逼近 — 从 algo_fingerprint.py 读取12维指纹, person=指定人名"""
+        fp = ALL_FINGERPRINTS.get(person or CURRENT_PERSON, FINGERPRINT)
         same_pct = fp.get("same_pct", 50)
         off_lo, off_hi = fp.get("offset_lo", -15), fp.get("offset_hi", 17)
         ch1_lo, ch1_hi = fp.get("ch1_lo", 3), fp.get("ch1_hi", 172)
@@ -648,6 +640,57 @@ class Balancer:
             time.sleep(0.08)
         return balanced
 
+    # ═══════ 7族M集序列 (同步APK版 septetMix) ═══════
+    F7_FEIGENBAUM = [1, 2, 4, 8, 16, 32]
+    F7_FIBONACCI = [1, 1, 2, 3, 5, 8, 13, 21, 34]
+    F7_SHARKOVSKY = [3,5,7,9,11,13,15,6,10,14,18,22,26,30,12,20,28,16,32]
+    F7_FAREY = [2,3,3,4,5,4,5,6,5,6,7,7,8,9,10,11]
+    F7_KNEADING = [2,3,5,7,11,13,17,19,23,29,31]
+    F7_MISIUREWICZ = [4,6,9,14,21,25,30]
+    F7_INTERNAL = [1,3,5,7,9,13,17,21,25,29]
+    F7_ALL = [F7_FEIGENBAUM,F7_FIBONACCI,F7_SHARKOVSKY,F7_FAREY,F7_KNEADING,F7_MISIUREWICZ,F7_INTERNAL]
+
+    @staticmethod
+    def _nearest(b9, seq):
+        return min(seq, key=lambda v: abs(b9 - v))
+
+    @classmethod
+    def _septet_mix(cls, b9):
+        dists = [min(abs(b9 - v) for v in f) for f in cls.F7_ALL]
+        w = [1.0 - d / (d + 4.0) if sum(dists) > 0 else 1.0 for d in dists]
+        w1, w2 = w[0]+w[1]+w[2], w[3]+w[4]+w[5]+w[6]
+        c1 = int(sum(cls._nearest(b9, cls.F7_ALL[i])*w[i] for i in range(3))/max(w1, 1e-6))
+        c2 = int(sum(cls._nearest(b9, cls.F7_ALL[i])*w[i] for i in range(3,7))/max(w2, 1e-6))
+        tw = sum(w)
+        return (max(14, min(31, c1)), max(0.3, min(1.5, w1/tw*1.5)),
+                max(14, min(31, c2)), max(0.3, min(1.5, w2/tw*1.5)))
+
+    def balance_septet(self, deltas):
+        """☀☽7族混音: CH1=结构族(Feigenbaum/Fibonacci/Sharkovsky), CH2=动力族(Farey/Kneading/Misiurewicz/InternalAddr)"""
+        balanced = []
+        for b9, delta in sorted(deltas.items(), key=lambda x: -abs(x[1]))[:12]:
+            if abs(delta) < 4: continue
+            organ, _, wuxing = B9_MAP.get(b9, ('?', '?', '土'))
+            corr = self._wuxing_corr(wuxing)
+            adjust = min(60, int(abs(delta) * 0.5 * corr))
+            base = self.cal_amp.get(str(b9), 15)
+            c1, w1, c2, w2 = self._septet_mix(b9)
+            if delta > 0:
+                b11 = max(3, base - int(adjust * w1))
+                b15 = min(172, base + int(adjust * w2))
+            else:
+                b11 = min(172, base + int(adjust * w1))
+                b15 = max(3, base - int(adjust * w2))
+            if self.ser and self.ser.is_open:
+                cmd = bytearray(128)
+                cmd[9] = c1; cmd[11] = b11; cmd[13] = c2; cmd[15] = b15
+                self._safe_write(cmd)
+            balanced.append({"b9":b9,"organ":organ,"delta":delta,"direction":"☀☽",
+                "ch1b9":c1,"ch1amp":b11,"ch2b9":c2,"ch2amp":b15})
+            self.add_log(f"  ☀☽7族 {organ} CH1={c1}w={w1:.2f} CH2={c2}w={w2:.2f}")
+            time.sleep(0.08)
+        return balanced
+
     def _treat_sleep(self, t=0.08):
         """治疗延时 = 基础秒 × treat_speed倍数"""
         time.sleep(t * self.treat_speed)
@@ -875,9 +918,9 @@ class Balancer:
                     if algo == "ab":
                         if not self._algo_queue:
                             self._batch_num += 1
-                            self._algo_queue = ["original", "legacy", "yinyang", "fusion", "schumann", "water", "jellium", "multiharm", "wuyin"]
+                            self._algo_queue = ["original", "legacy", "yinyang", "fusion", "schumann", "water", "jellium", "multiharm", "wuyin", "septet"]
                             random.shuffle(self._algo_queue)
-                            batch_labels = [({"original": "🔗原版", "legacy": "同频反相", "yinyang": "☀☽双频", "fusion": "⚡融合", "schumann": "🌍舒曼锚", "water": "💧水共振", "jellium": "⚛幻数", "multiharm": "🎵多谐波", "wuyin": "🎵五音"}[a]) for a in self._algo_queue]
+                            batch_labels = [({"original": "🔗原版", "legacy": "同频反相", "yinyang": "☀☽双频", "fusion": "⚡融合", "schumann": "🌍舒曼锚", "water": "💧水共振", "jellium": "⚛幻数", "multiharm": "🎵多谐波", "wuyin": "🎵五音", "septet": "☀☽7族混音"}[a]) for a in self._algo_queue]
                             self.add_log(f"─── 第{self._batch_num}遍: {' → '.join(batch_labels)} ───")
                         use_algo = self._algo_queue.pop(0)
                         self.status["current_algo"] = use_algo
@@ -887,7 +930,7 @@ class Balancer:
 
                     abn_list = sorted(abn.items(), key=lambda x: -abs(x[1]))
                     organ_names = [B9_MAP.get(b9, ('?', '?', ''))[0] for b9, _ in abn_list[:5]]
-                    algo_labels = {"original": "🔗原版", "legacy": "同频反相", "yinyang": "☀☽双频", "fusion": "⚡融合", "schumann": "🌍舒曼锚", "water": "💧水共振", "jellium": "⚛幻数", "multiharm": "🎵多谐波", "wuyin": "🎵五音"}
+                    algo_labels = {"original": "🔗原版", "legacy": "同频反相", "yinyang": "☀☽双频", "fusion": "⚡融合", "schumann": "🌍舒曼锚", "water": "💧水共振", "jellium": "⚛幻数", "multiharm": "🎵多谐波", "wuyin": "🎵五音", "septet": "☀☽7族混音"}
                     algo_label = algo_labels.get(use_algo, use_algo)
                     self.add_log(f"  ⚡ {len(abn)}项异常: {', '.join(organ_names[:3])} [{algo_label}]")
 
@@ -907,6 +950,8 @@ class Balancer:
                         balanced = self.balance_multiharm(deltas)
                     elif use_algo == "wuyin":
                         balanced = self.balance_wuyin(deltas)
+                    elif use_algo == "septet":
+                        balanced = self.balance_septet(deltas)
                     else:
                         balanced = self.balance_legacy(deltas)
 
@@ -1165,7 +1210,12 @@ canvas{display:block;margin:0 auto;border-radius:8px}
     <button class="algo-btn" onclick="setAlgo('jellium')" id="abJEL">⚛幻数</button>
     <button class="algo-btn" onclick="setAlgo('multiharm')" id="abMH">🎵多谐波</button>
     <button class="algo-btn" onclick="setAlgo('wuyin')" id="abWY">🎵五音</button>
+    <button class="algo-btn" onclick="setAlgo('septet')" id="abSEPT">☀☽7族</button>
     <button class="algo-btn active" onclick="setAlgo('ab')" id="abAB">🔄九维</button>
+  </div>
+  <div style="font-size:10px;color:#0f8;margin:6px 0 2px">
+    🔗原版指纹: <select id="personSelect" onchange="switchPerson(this.value)" style="background:#1a1a2e;color:#0f8;border:1px solid #0f8;border-radius:3px;padding:2px 6px;font-size:12px">
+    </select>
   </div>
   <div id="abStats" style="font-size:10px;color:#aaa;margin-top:4px"></div>
   <div id="abBars" style="margin-top:3px;display:none">
@@ -1497,6 +1547,25 @@ function setAlgo(mode){
     return fetch('/algo?mode='+mode);
   }).then(poll);
 }
+function switchPerson(name){
+  fetch('/person?name='+encodeURIComponent(name)).then(r=>r.json()).then(d=>{
+    if(d.ok) document.getElementById('personLabel').textContent=name;
+  });
+}
+function loadPersons(){
+  fetch('/persons').then(r=>r.json()).then(d=>{
+    var s=document.getElementById('personSelect');
+    s.innerHTML='';
+    d.persons.forEach(function(p){
+      var o=document.createElement('option');
+      o.value=p; o.textContent=p;
+      if(p===d.current) o.selected=true;
+      s.appendChild(o);
+    });
+  });
+}
+loadPersons();
+}
 
 function clearLogs(){
   if(!confirm('清空全部日志并重新开始？'))return;
@@ -1785,6 +1854,16 @@ class WebHandler(BaseHTTPRequestHandler):
                     self.balancer.status["ab_jellium"] = {"imp": 0, "wors": 0, "rounds": 0}
                     self.balancer.status["ab_multiharm"] = {"imp": 0, "wors": 0, "rounds": 0}
             self.send_json({"ok": True, "algo": mode})
+        elif p.path == "/persons":
+            self.send_json({"persons": PERSONS, "current": CURRENT_PERSON})
+        elif p.path == "/person":
+            qs = parse_qs(p.query)
+            person = qs.get("name", [PERSONS[0]])[0]
+            if person in ALL_FINGERPRINTS:
+                globals()["CURRENT_PERSON"] = person
+                self.send_json({"ok": True, "person": person})
+            else:
+                self.send_json({"ok": False, "error": f"未知人员: {person}"})
         elif p.path == "/clear_log":
             with self.balancer._lock:
                 self.balancer.status["log"] = []
