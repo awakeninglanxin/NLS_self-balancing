@@ -19,6 +19,7 @@ import kotlin.math.abs
 class BalancerEngine(private val ctx: Context) {
     private var connection: UsbDeviceConnection? = null
     private var epOut: UsbEndpoint? = null
+    private var epIn: UsbEndpoint? = null
     private var device: UsbDevice? = null
     private var job: Job? = null
     private val buf = ByteArray(128)
@@ -29,6 +30,7 @@ class BalancerEngine(private val ctx: Context) {
     var onLog: ((String) -> Unit)? = null
     var onChart: ((deltas: List<ChartDelta>, wuxing: Map<String, Double>) -> Unit)? = null
     var onBatchReport: ((batchNum: Int, stats: Map<String, AlgoStat>) -> Unit)? = null
+    var onDisconnect: (() -> Unit)? = null   // USB断连回调
     var isPlaying = false; private set
     var isConnected = false; private set
     var isCalibrated = false; private set
@@ -38,9 +40,23 @@ class BalancerEngine(private val ctx: Context) {
 
     private val usbReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            if (actionUsbPermission == intent.action) {
-                val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
-                permCallback?.invoke(granted); permCallback = null
+            when (intent.action) {
+                actionUsbPermission -> {
+                    val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
+                    permCallback?.invoke(granted); permCallback = null
+                }
+                UsbManager.ACTION_USB_DEVICE_DETACHED -> {
+                    if (isPlaying) {
+                        isPlaying = false
+                        job?.cancel()
+                        onLog?.invoke("⚠ 手环已断开! 请重新连接并校准后再次启动")
+                        onStatus?.invoke("手环已断开")
+                    }
+                    isConnected = false
+                    try { connection?.close() } catch (_: Exception) {}
+                    connection = null; epOut = null; epIn = null
+                    onDisconnect?.invoke()
+                }
             }
         }
     }
@@ -50,7 +66,11 @@ class BalancerEngine(private val ctx: Context) {
     fun initialize() {
         if (!registered) {
             val flags = if (Build.VERSION.SDK_INT >= 33) Context.RECEIVER_NOT_EXPORTED else 0
-            ctx.registerReceiver(usbReceiver, IntentFilter(actionUsbPermission), flags)
+            val filter = IntentFilter().apply {
+                addAction(actionUsbPermission)
+                addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
+            }
+            ctx.registerReceiver(usbReceiver, filter, flags)
             registered = true
         }
     }
@@ -83,7 +103,10 @@ class BalancerEngine(private val ctx: Context) {
                 for (j in 0 until iface.endpointCount) {
                     val ep = iface.getEndpoint(j)
                     if (ep.direction == UsbConstants.USB_DIR_OUT && ep.type == UsbConstants.USB_ENDPOINT_XFER_BULK) {
-                        epOut = ep; break
+                        epOut = ep
+                    }
+                    if (ep.direction == UsbConstants.USB_DIR_IN && ep.type == UsbConstants.USB_ENDPOINT_XFER_BULK) {
+                        epIn = ep
                     }
                 }
                 if (epOut != null) break
@@ -111,7 +134,7 @@ class BalancerEngine(private val ctx: Context) {
     fun disconnect() {
         stop()
         try { connection?.close() } catch (_: Exception) {}
-        connection = null; device = null; epOut = null
+        connection = null; device = null; epOut = null; epIn = null
         isConnected = false; isPlaying = false
         onStatus?.invoke("已断开")
     }
@@ -195,14 +218,7 @@ class BalancerEngine(private val ctx: Context) {
         Thread {
             try {
                 for (band in bands) {
-                    val raw: Double = try {
-                        sendPcapProbe(band.b9)
-                        Thread.sleep(80)
-                        // 可以加 IN 读取，暂用 probe 占位
-                        val r = connection?.bulkTransfer(epOut, ByteArray(128), 128, 100) ?: 0
-                        if (r > 0) 100.0 + Math.random() * 10 - 5
-                        else 105.0
-                    } catch (_: Exception) { 105.0 }
+                    val raw: Double = probe(band.b9)
                     baseline[band.b9] = raw
                     Thread.sleep(20)
                 }
@@ -251,9 +267,7 @@ class BalancerEngine(private val ctx: Context) {
                 val deltas = mutableMapOf<Int, Double>()
                 for (i in bands.indices) {
                     if (!isPlaying) break
-                    sendPcapProbe(bands[i].b9)
-                    delay(80)
-                    val raw = 100.0 + Math.random() * 10 - 5
+                    val raw = probe(bands[i].b9)
                     val bl = baseline[bands[i].b9] ?: 105.0
                     deltas[bands[i].b9] = raw - bl
                     onProgress?.invoke(i + 1, bands.size)
@@ -343,11 +357,22 @@ class BalancerEngine(private val ctx: Context) {
     /** 使用PCAP振幅映射发送探针(检测模式: CH1≠CH2振幅) */
     private fun sendPcapProbe(b9: Int) = sendProbe(b9, ch1Amp(b9), ch2Amp(b9), b9)
 
-    /** USB探测: 发送命令并读取256字节响应 */
+    /** USB探测: 发送命令并读取IN响应(134字节, 132个有符号byte检测值) */
     private fun probe(b9: Int): Double {
-        sendPcapProbe(b9)
-        try { Thread.sleep(80) } catch (_: Exception) {}
-        return 100.0 + (Math.random() * 10 - 5)
+        if (!isConnected || epIn == null) return 105.0  // 断连返回中值
+        try {
+            sendPcapProbe(b9)
+            Thread.sleep(80)
+            val inBuf = ByteArray(256)
+            val r = connection?.bulkTransfer(epIn, inBuf, inBuf.size, 100) ?: 0
+            if (r < 2) return 105.0
+            // 取前132字节(跳过包头)的均值→值域偏移
+            var sum = 0.0; var cnt = 0
+            for (i in 2 until minOf(r, 134)) {
+                sum += inBuf[i].toDouble(); cnt++
+            }
+            return if (cnt > 0) 100.0 + (sum / cnt) * 0.5 else 105.0
+        } catch (_: Exception) { return 105.0 }
     }
 
     private fun wuxingCorr(wx: String): Double = when(wx) {

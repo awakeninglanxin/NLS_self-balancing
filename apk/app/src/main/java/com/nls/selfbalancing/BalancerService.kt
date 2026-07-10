@@ -43,6 +43,7 @@ class BalancerService : Service() {
         engine.onLog = { msg -> uiLog?.invoke(msg) }
         engine.onChart = { deltas, wx -> uiChart?.invoke(deltas, wx) }
         engine.onBatchReport = { n, s -> uiBatchReport?.invoke(n, s) }
+        engine.onDisconnect = { uiStatus?.invoke("手环已断开"); uiLog?.invoke("⚠ 手环已断开，请重新连接并校准") }
         createNotificationChannel()
     }
 
