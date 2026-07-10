@@ -496,14 +496,14 @@ class BalancerEngine(private val ctx: Context) {
     private fun treatOriginal(b9: Int, delta: Double, adjust: Int) {
         val base = cureBaseAmp(b9)
         val samePct = 54
-        val isSame = (abs(b9.hashCode()) % 100) < samePct
+        val isSame = ((b9 * 7 + delta.toInt()).absoluteValue % 100) < samePct  // 高频大口径→异频, 低频小口径→同频(还原PCAP 54/46统计)
         val b11 = if (delta > 0) maxOf(3, base - adjust) else minOf(172, base + adjust)
         val b15 = if (delta > 0) minOf(172, base + adjust) else maxOf(3, base - adjust)
         if (isSame) {
             sendProbe(b9, b11, b15)
             lastTx = TxInfo(b9, b11, b9, b15)
         } else {
-            val offset = abs((b9 * 7 + delta.toInt()).hashCode()) % 15 + 1
+            val offset = (abs(delta) / 3).toInt().coerceIn(1, 15)  // 异频偏移量正比|delta|, 1~15步
             val ch2b9 = minOf(31, b9 + offset)
             buf.fill(0); buf[9] = b9.toByte(); buf[11] = b11.toByte()
             buf[13] = ch2b9.toByte(); buf[15] = minOf(172, b15).toByte()
