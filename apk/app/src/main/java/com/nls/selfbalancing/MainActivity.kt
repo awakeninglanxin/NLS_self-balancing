@@ -218,6 +218,17 @@ class MainActivity : AppCompatActivity() {
             override fun onStartTrackingTouch(s: SeekBar?) {}
             override fun onStopTrackingTouch(s: SeekBar?) {}
         })
+
+        val powerBoostSlider = findViewById<SeekBar>(R.id.powerBoostSlider)
+        val powerBoostLabel = findViewById<TextView>(R.id.powerBoostLabel)
+        powerBoostSlider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(s: SeekBar, v: Int, fromUser: Boolean) {
+                ensureEngine()?.let { it.powerBoost = v }
+                powerBoostLabel.text = "+$v"
+            }
+            override fun onStartTrackingTouch(s: SeekBar?) {}
+            override fun onStopTrackingTouch(s: SeekBar?) {}
+        })
     }
 
     private fun buildTabHost() {

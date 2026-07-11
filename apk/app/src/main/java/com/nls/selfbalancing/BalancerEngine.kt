@@ -210,6 +210,7 @@ class BalancerEngine(private val ctx: Context) {
     var minInterval: Float = 0.49f  // 最小命令间隔 (0.1~1s, 默认0.49s)
     var pauseThreshold: Float = 1.0f  // 长暂停阈值 (0.1~6s, 默认1s)
     var maxBurst: Int = 8  // 最长连续同频burst (1~12, 默认8)
+    var powerBoost: Int = 0  // 全局功率偏移 (+0~+5)
     private var algoQueue = mutableListOf<String>()
     private var batchNum = 0
     private var baseline = mutableMapOf<Int, Double>()
@@ -352,9 +353,19 @@ class BalancerEngine(private val ctx: Context) {
 
     private fun sendProbe(b9: Int, b11: Int, b15: Int, b13: Int = b9) {
         buf.fill(0)
-        buf[9] = b9.toByte(); buf[11] = b11.toByte()
-        buf[13] = b13.toByte(); buf[15] = b15.toByte()
+        buf[9] = b9.toByte()
+        buf[11] = minOf(172, b11 + powerBoost).toByte()
+        buf[13] = b13.toByte()
+        buf[15] = minOf(172, b15 + powerBoost).toByte()
         try { connection?.bulkTransfer(epOut, buf, buf.size, 1000) } catch (_: Exception) {}
+    }
+
+    private fun flushBuf() {
+        if (powerBoost > 0) {
+            buf[11] = minOf(172, (buf[11].toInt() and 0xFF) + powerBoost).toByte()
+            buf[15] = minOf(172, (buf[15].toInt() and 0xFF) + powerBoost).toByte()
+        }
+        flushBuf()
     }
 
     /** 使用PCAP振幅映射发送探针(检测模式: CH1≠CH2振幅) */
@@ -393,7 +404,7 @@ class BalancerEngine(private val ctx: Context) {
         val ch2b9 = if (delta > 0) (b9 + offset).coerceIn(14, 31) else (b9 - offset).coerceIn(14, 31)
         buf.fill(0); buf[9] = b9.toByte(); buf[11] = b11.toByte()
         buf[13] = ch2b9.toByte(); buf[15] = b15.toByte()
-        try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
+        flushBuf()
         lastTx = TxInfo(b9, b11, ch2b9, b15)
     }
 
@@ -439,7 +450,7 @@ class BalancerEngine(private val ctx: Context) {
                  else (base - adjust * wM).toInt().coerceIn(3, 172)
         buf.fill(0); buf[9] = sB9.toByte(); buf[11] = a1.toByte()
         buf[13] = mB9.toByte(); buf[15] = a2.toByte()
-        try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
+        flushBuf()
         lastTx = TxInfo(sB9, a1, mB9, a2)
     }
 
@@ -450,7 +461,7 @@ class BalancerEngine(private val ctx: Context) {
         val a2 = if (delta > 0) (base + ad * m.ch2W).toInt().coerceIn(3, 172) else (base - ad * m.ch2W).toInt().coerceIn(3, 172)
         buf.fill(0); buf[9] = m.ch1B9.toByte(); buf[11] = a1.toByte()
         buf[13] = m.ch2B9.toByte(); buf[15] = a2.toByte()
-        try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
+        flushBuf()
         lastTx = TxInfo(m.ch1B9, a1, m.ch2B9, a2)
     }
 
@@ -462,7 +473,7 @@ class BalancerEngine(private val ctx: Context) {
         val c1 = b9.coerceIn(s - 2, s + 2); val c2 = b9.coerceIn(m - 2, m + 2)
         buf.fill(0); buf[9] = c1.toByte(); buf[11] = b11.toByte()
         buf[13] = c2.toByte(); buf[15] = b15.toByte()
-        try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
+        flushBuf()
         lastTx = TxInfo(c1, b11, c2, b15)
     }
 
@@ -473,7 +484,7 @@ class BalancerEngine(private val ctx: Context) {
         val ch2B9 = (schB9 + sIdx + 1).coerceIn(14, 31)
         buf.fill(0); buf[9] = schB9.toByte(); buf[11] = base.toByte()
         buf[13] = ch2B9.toByte(); buf[15] = base.toByte()
-        try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
+        flushBuf()
         lastTx = TxInfo(schB9, base, ch2B9, base)
     }
 
@@ -491,7 +502,7 @@ class BalancerEngine(private val ctx: Context) {
         val ch2b9 = (b9 + ch2offset).coerceIn(14, 31)
         buf.fill(0); buf[9] = b9.toByte(); buf[11] = b11.toByte()
         buf[13] = ch2b9.toByte(); buf[15] = b15.toByte()
-        try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
+        flushBuf()
         lastTx = TxInfo(b9, b11, ch2b9, b15)
     }
 
@@ -510,7 +521,7 @@ class BalancerEngine(private val ctx: Context) {
             val ch2b9 = minOf(31, b9 + offset)
             buf.fill(0); buf[9] = b9.toByte(); buf[11] = b11.toByte()
             buf[13] = ch2b9.toByte(); buf[15] = minOf(172, b15).toByte()
-            try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
+            flushBuf()
             lastTx = TxInfo(b9, b11, ch2b9, minOf(172, b15))
         }
     }
@@ -530,7 +541,7 @@ class BalancerEngine(private val ctx: Context) {
         val ch2b9 = if (shellNum % 2 == 0) b9 else minOf(31, b9 + (shellNum % 5) + 1)
         buf.fill(0); buf[9] = b9.toByte(); buf[11] = b11.toByte()
         buf[13] = ch2b9.toByte(); buf[15] = b15.toByte()
-        try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
+        flushBuf()
         lastTx = TxInfo(b9, b11, ch2b9, b15)
     }
 
@@ -555,7 +566,7 @@ class BalancerEngine(private val ctx: Context) {
             buf.fill(0)
             buf[9] = ch1b9.toByte(); buf[11] = ch1Amp.toByte()
             buf[13] = ch2b9.toByte(); buf[15] = ch2Amp.toByte()
-            try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
+            flushBuf()
             lastTx = TxInfo(ch1b9, ch1Amp, ch2b9, ch2Amp, 5)
             if (i < 4) try { Thread.sleep(treatMs(40)) } catch (_: Exception) {}
         }
@@ -584,7 +595,7 @@ class BalancerEngine(private val ctx: Context) {
                  else (base - adjust).coerceIn(3, 172)
         buf.fill(0); buf[9] = note.ch1b9.toByte(); buf[11] = b11.toByte()
         buf[13] = note.ch2b9.toByte(); buf[15] = b15.toByte()
-        try { connection?.bulkTransfer(epOut, buf, buf.size, 500) } catch (_: Exception) {}
+        flushBuf()
         lastTx = TxInfo(note.ch1b9, b11, note.ch2b9, b15)
         onLog?.invoke("    🎵${note.label} CH1=${note.ch1b9} CH2=${note.ch2b9} | ${lastTx.fmt()}")
     }

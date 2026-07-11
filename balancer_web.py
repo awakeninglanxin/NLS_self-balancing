@@ -110,6 +110,7 @@ class Balancer:
         self.min_interval = 0.49  # 最小命令间隔 (0.1~1s, 默认0.49s=PCAP实测)
         self.pause_threshold = 1.0  # 长暂停阈值 (0.1~6s, 默认1s)
         self.max_burst = 8  # 最长连续同频burst (1~12, 默认8)
+        self.power_boost = 0  # 全局功率偏移 (+0~+5)
         # 每次启动清空旧基线，强制重新悬空校准
         if os.path.exists(BASELINE_FILE):
             os.remove(BASELINE_FILE)
@@ -122,6 +123,7 @@ class Balancer:
             "min_interval": self.min_interval,
             "pause_threshold": self.pause_threshold,
             "max_burst": self.max_burst,
+            "power_boost": self.power_boost,
             "per_b9_amp": self.per_b9_amp,
             "algo": "ab",
             "ab_original": {"imp": 0, "wors": 0, "rounds": 0},
@@ -185,9 +187,12 @@ class Balancer:
             return [100] * 256
 
     def _safe_write(self, cmd):
-        """安全写命令，捕获串口断开异常"""
+        """安全写命令，自动应用功率偏移"""
         try:
             if self.ser and self.ser.is_open:
+                if self.power_boost > 0:
+                    cmd[11] = min(172, cmd[11] + self.power_boost)
+                    cmd[15] = min(172, cmd[15] + self.power_boost)
                 self.ser.write(bytes(cmd))
                 return True
         except (serial.SerialException, OSError):
@@ -1254,6 +1259,11 @@ canvas{display:block;margin:0 auto;border-radius:8px}
     <input type="range" id="maxBurstSlider" min="1" max="12" value="8" style="flex:1;accent-color:#ff8866;height:4px" oninput="setMaxBurst(this.value)">
     <span id="maxBurstVal" style="font-size:11px;color:#aaa;min-width:22px">8</span>
   </div>
+  <div style="display:flex;align-items:center;gap:6px;margin:3px 0">
+    <span style="font-size:10px;color:#ff44aa">🔊 功率偏移</span>
+    <input type="range" id="powerBoostSlider" min="0" max="5" value="0" style="flex:1;accent-color:#ff44aa;height:4px" oninput="setPowerBoost(this.value)">
+    <span id="powerBoostVal" style="font-size:11px;color:#aaa;min-width:22px">+0</span>
+  </div>
   <div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap">
     <button class="algo-btn" onclick="setAlgo('original')" id="abORG">🔗原版</button>
     <button class="algo-btn" onclick="setAlgo('yinyang')" id="abYY">☀☽</button>
@@ -1562,6 +1572,11 @@ function setMaxBurst(v){
   fetch('/set_max_burst/'+v);
 }
 
+function setPowerBoost(v){
+  document.getElementById('powerBoostVal').textContent='+'+v;
+  fetch('/set_power_boost/'+v);
+}
+
 function autoTune(){
   var btn=document.querySelector('[onclick=\"autoTune()\"]');
   var orig=btn.textContent; btn.textContent='扫描中…'; btn.disabled=true;
@@ -1751,6 +1766,12 @@ function poll(){
       var mbsl=document.getElementById('maxBurstSlider');
       if(document.activeElement!==mbsl){
         mbsl.value=s.max_burst; document.getElementById('maxBurstVal').textContent=s.max_burst;
+      }
+    }
+    if(s.power_boost!=null && document.getElementById('powerBoostVal')){
+      var pbsl=document.getElementById('powerBoostSlider');
+      if(document.activeElement!==pbsl){
+        pbsl.value=s.power_boost; document.getElementById('powerBoostVal').textContent='+'+s.power_boost;
       }
     }
 
@@ -2037,6 +2058,15 @@ class WebHandler(BaseHTTPRequestHandler):
                 self.send_json({"ok": True, "max_burst": v})
             except:
                 self.send_json({"ok": False, "msg": "无效burst值"})
+        elif p.path.startswith("/set_power_boost/"):
+            try:
+                v = int(p.path.split("/")[-1])
+                v = max(0, min(5, v))
+                self.balancer.power_boost = v
+                self.balancer.add_log(f"🔊 功率偏移 +{v}")
+                self.send_json({"ok": True, "power_boost": v})
+            except:
+                self.send_json({"ok": False, "msg": "无效功率偏移"})
         elif p.path == "/diag_channels":
             if not self.balancer.ser or not self.balancer.ser.is_open:
                 self.send_json({"ok": False, "msg": "手环未连接"})
