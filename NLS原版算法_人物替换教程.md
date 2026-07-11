@@ -6,7 +6,7 @@
 
 ## 1. 背景：原版算法的本质
 
-`balancer_web.py` 里的 `balance_original_hybrid()` 不是凭空写的——它是从蔡明琦的疗愈抓包文件（`nls_cmq2cure`，3,505 条 USB 命令）逆推出来的。
+`balancer_web.py` 里的 `balance_original_hybrid()` 不是凭空写的——它是从蔡**的疗愈抓包文件（`nls_cmq2cure`，3,505 条 USB 命令）逆推出来的。
 
 ```
 原版 NLS 软件 → 写 USB 命令 → USBPcap 抓包 → PCAP 文件
@@ -20,7 +20,7 @@
 
 | 人物 | PCAP 文件 | 疗愈命令数 | 同频:异频 | 特点 |
 |------|-----------|:--:|:--:|------|
-| 蔡明琦 | `我的pdf/明锜/nls_cmq2cure` | 3,505 | 47:53 | 当前默认，皮肤(b9=20) CH1=97.9 高推力 |
+| 蔡** | `我的pdf/明锜/nls_cmq2cure` | 3,505 | 47:53 | 当前默认，皮肤(b9=20) CH1=97.9 高推力 |
 | 丽梦儿 | `我的pdf/丽梦儿/zly_cure` | 5,480 | 45:55 | 命令更多，比例相似 |
 | 你的 | 由原版软件对你的 XCH 报告执行疗愈时抓取 | — | — | 需要你再次抓包 |
 
@@ -93,8 +93,8 @@ cd "D:\AAA我的文件\nls_dynamic_balancer"
 # 丽梦儿版
 python pcap_to_algo.py "D:\AAA我的文件\中健国康 NLS细胞检测\我的pdf\丽梦儿\zly_cure" --name 丽梦儿
 
-# 蔡明琦版（默认）
-python pcap_to_algo.py "D:\AAA我的文件\中健国康 NLS细胞检测\我的pdf\明锜\nls_cmq2cure" --name 蔡明琦
+# 蔡**版（默认）
+python pcap_to_algo.py "D:\AAA我的文件\中健国康 NLS细胞检测\我的pdf\明锜\nls_cmq2cure" --name 蔡**
 ```
 
 输出：
@@ -139,8 +139,8 @@ python pcap_to_algo.py "D:\AAA我的文件\中健国康 NLS细胞检测\我的pd
 # 切换到丽梦儿版
 python pcap_to_algo.py "D:\...\丽梦儿\zly_cure" --name 丽梦儿
 
-# 切换到蔡明琦版（默认）
-python pcap_to_algo.py "D:\...\明锜\nls_cmq2cure" --name 蔡明琦
+# 切换到蔡**版（默认）
+python pcap_to_algo.py "D:\...\明锜\nls_cmq2cure" --name 蔡**
 
 # 对比两人差异
 python pcap_to_algo.py "D:\...\明锜\nls_cmq2cure" --diff "D:\...\丽梦儿\zly_cure"
