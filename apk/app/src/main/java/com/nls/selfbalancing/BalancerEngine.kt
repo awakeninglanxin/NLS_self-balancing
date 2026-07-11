@@ -354,12 +354,12 @@ class BalancerEngine(private val ctx: Context) {
     /** 治疗延时 = max(minInterval*1000, 基础毫秒 × treatSpeed) */
     private fun treatMs(ms: Long): Long = maxOf((minInterval * 1000).toLong(), (ms * treatSpeed).toLong())
 
-    private fun sendProbe(b9: Int, b11: Int, b15: Int, b13: Int = b9) {
+    private fun sendProbe(b9: Int, b11: Int, b15: Int, b13: Int = b9, boost: Boolean = false) {
         buf.fill(0)
         buf[9] = b9.toByte()
-        buf[11] = minOf(172, b11 + powerBoost).toByte()
+        buf[11] = (if (boost) minOf(172, b11 + powerBoost) else b11).toByte()
         buf[13] = b13.toByte()
-        buf[15] = minOf(172, b15 + powerBoost).toByte()
+        buf[15] = (if (boost) minOf(172, b15 + powerBoost) else b15).toByte()
         try { connection?.bulkTransfer(epOut, buf, buf.size, 1000) } catch (_: Exception) {}
     }
 
@@ -517,7 +517,7 @@ class BalancerEngine(private val ctx: Context) {
         val b11 = if (delta > 0) maxOf(3, base - adjust) else minOf(172, base + adjust)
         val b15 = if (delta > 0) minOf(172, base + adjust) else maxOf(3, base - adjust)
         if (isSame) {
-            sendProbe(b9, b11, b15)
+            sendProbe(b9, b11, b15, boost = true)
             lastTx = TxInfo(b9, b11, b9, b15)
         } else {
             val offset = (abs(delta) / 3).toInt().coerceIn(1, 15)  // 异频偏移正比|delta|
