@@ -99,6 +99,7 @@ class Balancer:
     def __init__(self):
         self.ser = None
         self.baseline = {}
+        self.baseline_2d = {}  # Farey双通道基线 {b9/b13: avg}
         self.running = False
         self.calibrating = False
         self._algo_queue = []
@@ -111,14 +112,15 @@ class Balancer:
         self.pause_threshold = 1.0  # 长暂停阈值 (0.1~6s, 默认1s)
         self.max_burst = 8  # 最长连续同频burst (1~12, 默认8)
         self.power_boost = 0  # 全局功率偏移 (+0~+5)
-        # 每次启动清空旧基线，强制重新悬空校准
-        if os.path.exists(BASELINE_FILE):
-            os.remove(BASELINE_FILE)
+        # 加载上次校准的基线 (持久化, 无需每次重校)
+        self.baseline_age = 0  # 基线年龄(秒), 用于提示过期
         self.status = {
             "playing": False, "scanning": False, "round": 0,
             "deltas": {}, "verify": {}, "log": [],
             "improved": 0, "worsened": 0, "connected": False,
             "has_baseline": False,
+            "baseline_age": 0,  # 基线年龄(小时)
+            "has_2d_baseline": False,
             "scan_amp": self.scan_amp,
             "min_interval": self.min_interval,
             "pause_threshold": self.pause_threshold,
@@ -150,11 +152,25 @@ class Balancer:
             with open(BASELINE_FILE) as f:
                 self.baseline = {int(k): v for k, v in json.load(f).items()}
             self.status["has_baseline"] = len(self.baseline) >= 18
+            # 记录基线年龄
+            self.baseline_age = time.time() - os.path.getmtime(BASELINE_FILE)
+            self.status["baseline_age"] = round(self.baseline_age / 3600, 1)
+        # 加载2D基线
+        if os.path.exists("nls_baseline_2d.json"):
+            with open("nls_baseline_2d.json") as f:
+                self.baseline_2d = json.load(f)
+            self.status["has_2d_baseline"] = len(self.baseline_2d) >= 50
 
     def connect(self):
         try:
             self.ser = serial.Serial(COM_PORT, 115200, timeout=0.5, write_timeout=0.5)
             self.status["connected"] = True
+            # 提示基线状态
+            if self.baseline:
+                age_h = self.status.get("baseline_age", 0)
+                self.add_log(f"📡 手环已连接, 基线复用 ({len(self.baseline)}频段, {age_h}h前校准)")
+            if self.baseline_2d:
+                self.add_log(f"📡 2D基线已加载 ({len(self.baseline_2d)}点)")
             return True
         except:
             self.status["connected"] = False
@@ -185,6 +201,94 @@ class Balancer:
                 except: pass
                 self.ser = None
             return [100] * 256
+
+    def probe_2d(self, b9, b13, b11=15, b15=15):
+        """双通道探头: 同时指定CH1频率(b9)和CH2频率(b13)"""
+        if not self.ser or not self.ser.is_open:
+            return [100] * 256
+        try:
+            cmd = bytearray(128)
+            cmd[9] = b9; cmd[11] = b11; cmd[13] = b13; cmd[15] = b15
+            self.ser.reset_input_buffer()
+            if not self._safe_write(cmd):
+                self.add_log("⚠ 写入失败，设备可能断开")
+                return [100] * 256
+            time.sleep(0.08)
+            return list(self.ser.read(256))
+        except (serial.SerialException, OSError) as e:
+            self.status["connected"] = False
+            if self.ser:
+                try: self.ser.close()
+                except: pass
+                self.ser = None
+            return [100] * 256
+
+    def test_b13_blindspot(self):
+        """定性验证: b9=29时不同b13的传感器响应差异
+        预测: b13=26的响应 ≠ b13=29的响应 (若差异>1则假设成立)"""
+        self.add_log("🔬 B13盲区验证: b9=29固定, 扫3个b13值…")
+        results = {}
+        for b13 in [29, 26, 24]:
+            if not self.ser or not self.ser.is_open:
+                self.add_log(f"  b13={b13}: ⚠ 设备断开")
+                results[f"29/{b13}"] = {"avg": 0, "status": "断连"}
+                continue
+            time.sleep(0.2)
+            resp = self.probe_2d(29, b13, b11=self.scan_amp, b15=self.scan_amp)
+            if len(resp) == 256:
+                avg = round(sum(resp) / 256, 1)
+                results[f"29/{b13}"] = {"avg": avg, "raw_len": len(resp)}
+                self.add_log(f"  b9=29 b13={b13:>2d}: avg={avg:.1f}")
+            else:
+                results[f"29/{b13}"] = {"avg": 0, "raw_len": len(resp), "status": "超时"}
+                self.add_log(f"  b13={b13}: ⚠ 读取超时({len(resp)}B)")
+
+        # 判断
+        a29 = results.get("29/29", {}).get("avg", 0)
+        a26 = results.get("29/26", {}).get("avg", 0)
+        a24 = results.get("29/24", {}).get("avg", 0)
+        if abs(a29 - a26) > 1:
+            self.add_log(f"✅ 假设成立! Δ(29/29→29/26)={abs(a29-a26):.1f} → b13盲区确���存在")
+            verdict = "confirmed"
+        else:
+            self.add_log(f"⚠ Δ={abs(a29-a26):.1f}, 差异较小, 但可能存在")
+            verdict = "marginal"
+        return {"ok": True, "results": results, "verdict": verdict}
+
+    def calibrate_farey_2d(self):
+        """Farey双通道校准: 5个偏移量×18个b9≈90次探头
+        Farey偏移 = [0, -1, -3, -5, -7] 对应 period 1,2,3,5,7"""
+        self.calibrating = True
+        FAREY_OFFSETS = [0, -1, -3, -5, -7]
+        try:
+            self.add_log("📐 Farey双通道校准中…传感器悬空")
+            self.baseline_2d = {}
+            total = 0
+            for b9 in range(14, 32):
+                for d in FAREY_OFFSETS:
+                    b13 = max(14, min(31, b9 + d))
+                    if not self.ser or not self.ser.is_open:
+                        self.add_log("⚠ 设备断开, 中止")
+                        self.calibrating = False
+                        return {"ok": False, "msg": "设备断开"}
+                    time.sleep(0.05)
+                    resp = self.probe_2d(b9, b13, b11=self.scan_amp, b15=self.scan_amp)
+                    key = f"{b9}/{b13}"
+                    avg = round(sum(resp) / 256, 1) if len(resp) == 256 else 105.0
+                    if key not in self.baseline_2d:
+                        self.baseline_2d[key] = avg
+                    total += 1
+            # 保存
+            with open("nls_baseline_2d.json", "w") as f:
+                json.dump(self.baseline_2d, f, indent=2)
+            self.add_log(f"✅ Farey双通道校准完成: {total}点 → nls_baseline_2d.json")
+            self.status["has_2d_baseline"] = True
+            return {"ok": True, "points": total}
+        except Exception as e:
+            self.add_log(f"❌ Farey校准失败: {str(e)[:60]}")
+            return {"ok": False, "msg": str(e)[:80]}
+        finally:
+            self.calibrating = False
 
     def _safe_write(self, cmd):
         """安全写命令，自动应用功率偏移"""
@@ -766,7 +870,9 @@ class Balancer:
             with open(BASELINE_FILE, 'w') as f:
                 json.dump(raw, f, indent=2)
             self.add_log("✅ 基线校准完成")
+            self.baseline_age = 0
             self.status["has_baseline"] = True
+            self.status["baseline_age"] = 0
             # 相位曲线已存盘, 无需每次扫18频段
             if not self.phase_calib:
                 self.calibrate_phase()
@@ -1221,6 +1327,8 @@ canvas{display:block;margin:0 auto;border-radius:8px}
   <button class="btn btn-stop" id="btnStop" onclick="api('/stop')" style="display:none">⏹ 停止</button>
   <button class="btn btn-stop cmp-btn" id="btnCmp" onclick="stopAndCompare()" style="display:none">📊 停止&对比</button>
   <button class="btn btn-cal" onclick="api('/calibrate')">📐 校准基线</button>
+  <button class="btn btn-cal" onclick="testB13()" style="color:#ff6600">🔬 B13盲区验证</button>
+  <button class="btn btn-cal" onclick="calibrate2D()" style="color:#ffaa00">📐 Farey双通道校准</button>
   <button class="btn btn-cal" onclick="verifyPhase()" style="color:#ffaa00">🔬 验相位</button>
   <button class="btn btn-cal" onclick="diagCh()" style="color:#7c4dff;font-size:11px">🔬 信道诊断</button>
 </div>
@@ -1229,6 +1337,7 @@ canvas{display:block;margin:0 auto;border-radius:8px}
     <b>⚖ 九维对比</b>
     <span style="display:flex;align-items:center;gap:6px">
       <span id="baselineDot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#f44" title="基线状态"></span>
+      <span id="baseline2dDot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#888" title="2D基线"></span>
       <span id="couplingBadge" style="font-size:10px;color:#888">∿ --</span>
       <span id="entropyBadge" style="font-size:10px;color:#888">H --</span>
     </span>
@@ -1622,6 +1731,12 @@ function verifyPhase(){
 function diagCh(){
   api('/diag_channels');
 }
+function testB13(){
+  api('/test_b13');
+}
+function calibrate2D(){
+  api('/calibrate_2d');
+}
 
 function setAlgo(mode){
   document.querySelectorAll('.algo-btn').forEach(function(b){b.classList.remove('active')});
@@ -1737,8 +1852,13 @@ function poll(){
       ov.classList.remove('hidden');
     }
 
-    // Baseline dot
-    document.getElementById('baselineDot').style.background=s.has_baseline?'#00ff88':'#f44';
+    // Baseline dot + age
+    var bDot=document.getElementById('baselineDot');
+    bDot.style.background=s.has_baseline?(s.baseline_age>24?'#ffaa00':'#00ff88'):'#f44';
+    var ageText=s.has_baseline?(s.baseline_age>0?(' ('+s.baseline_age+'h前)'):' (刚校准)'):' (未校准)';
+    bDot.title='基线'+ageText;
+    // 2D baseline
+    document.getElementById('baseline2dDot').style.background=s.has_2d_baseline?'#00ff88':'#888';
     // Sync scan amp slider (only if not currently dragging)
     if(s.scan_amp && document.getElementById('scanAmpVal')){
       var sl=document.getElementById('scanAmpSlider');
@@ -2088,6 +2208,19 @@ class WebHandler(BaseHTTPRequestHandler):
                 return
             threading.Thread(target=self.balancer.calibrate, daemon=True).start()
             self.send_json({"ok": True, "msg": "校准中…"})
+        elif p.path == "/test_b13":
+            if not self.balancer.ser or not self.balancer.ser.is_open:
+                self.send_json({"ok": False, "msg": "手环未连接"})
+                return
+            threading.Thread(target=lambda: setattr(self, '_b13_result', self.balancer.test_b13_blindspot()), daemon=True).start()
+            time.sleep(0.1)
+            self.send_json({"ok": True, "msg": "B13盲区验证中…"})
+        elif p.path == "/calibrate_2d":
+            if not self.balancer.ser or not self.balancer.ser.is_open:
+                self.send_json({"ok": False, "msg": "手环未连接"})
+                return
+            threading.Thread(target=self.balancer.calibrate_farey_2d, daemon=True).start()
+            self.send_json({"ok": True, "msg": "Farey双通道校准中…"})
         else:
             self.send_response(404)
             self.end_headers()
