@@ -107,6 +107,9 @@ class Balancer:
         self.scan_amp = 20  # 扫描振幅 (3-80), 默认20比原15更敏感
         self.per_b9_amp = {}  # {b9: amp} 每个频段的独立最优振幅 (auto_tune填充)
         self.treat_speed = 1.0  # 治疗时间周期倍数 1~12
+        self.min_interval = 0.49  # 最小命令间隔 (0.1~1s, 默认0.49s=PCAP实测)
+        self.pause_threshold = 1.0  # 长暂停阈值 (0.1~6s, 默认1s)
+        self.max_burst = 8  # 最长连续同频burst (1~12, 默认8)
         # 每次启动清空旧基线，强制重新悬空校准
         if os.path.exists(BASELINE_FILE):
             os.remove(BASELINE_FILE)
@@ -116,6 +119,9 @@ class Balancer:
             "improved": 0, "worsened": 0, "connected": False,
             "has_baseline": False,
             "scan_amp": self.scan_amp,
+            "min_interval": self.min_interval,
+            "pause_threshold": self.pause_threshold,
+            "max_burst": self.max_burst,
             "per_b9_amp": self.per_b9_amp,
             "algo": "ab",
             "ab_original": {"imp": 0, "wors": 0, "rounds": 0},
@@ -713,8 +719,9 @@ class Balancer:
         return balanced
 
     def _treat_sleep(self, t=0.08):
-        """治疗延时 = 基础秒 × treat_speed倍数"""
-        time.sleep(t * self.treat_speed)
+        """治疗延时 = max(min_interval, 基础秒 × treat_speed)"""
+        t_eff = max(self.min_interval, t * self.treat_speed)
+        time.sleep(t_eff)
 
     # 治疗循环中的延时（从 verify 后开始）
     def verify(self, before):
@@ -1232,6 +1239,21 @@ canvas{display:block;margin:0 auto;border-radius:8px}
     <input type="range" id="speedSlider" min="1" max="12" value="1" style="flex:1;accent-color:#ff6600;height:4px" oninput="setSpeed(this.value)">
     <span id="speedVal" style="font-size:11px;color:#aaa;min-width:28px">×1</span>
   </div>
+  <div style="display:flex;align-items:center;gap:6px;margin:3px 0">
+    <span style="font-size:10px;color:#0f8">⏱ 最小间隔</span>
+    <input type="range" id="minIntervalSlider" min="10" max="100" value="49" style="flex:1;accent-color:#0f8;height:4px" oninput="setMinInterval(this.value)">
+    <span id="minIntervalVal" style="font-size:11px;color:#aaa;min-width:36px">0.49s</span>
+  </div>
+  <div style="display:flex;align-items:center;gap:6px;margin:3px 0">
+    <span style="font-size:10px;color:#ffcc44">⏸ 长暂停</span>
+    <input type="range" id="pauseThreshSlider" min="1" max="60" value="10" style="flex:1;accent-color:#ffcc44;height:4px" oninput="setPauseThreshold(this.value)">
+    <span id="pauseThreshVal" style="font-size:11px;color:#aaa;min-width:32px">1.0s</span>
+  </div>
+  <div style="display:flex;align-items:center;gap:6px;margin:3px 0">
+    <span style="font-size:10px;color:#ff8866">🔁 最长Burst</span>
+    <input type="range" id="maxBurstSlider" min="1" max="12" value="8" style="flex:1;accent-color:#ff8866;height:4px" oninput="setMaxBurst(this.value)">
+    <span id="maxBurstVal" style="font-size:11px;color:#aaa;min-width:22px">8</span>
+  </div>
   <div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap">
     <button class="algo-btn" onclick="setAlgo('original')" id="abORG">🔗原版</button>
     <button class="algo-btn" onclick="setAlgo('yinyang')" id="abYY">☀☽</button>
@@ -1523,6 +1545,23 @@ function setSpeed(v){
   fetch('/set_speed/'+v);
 }
 
+function setMinInterval(v){
+  var val=(v/100).toFixed(2);
+  document.getElementById('minIntervalVal').textContent=val+'s';
+  fetch('/set_min_interval/'+v);
+}
+
+function setPauseThreshold(v){
+  var val=(v/10).toFixed(1);
+  document.getElementById('pauseThreshVal').textContent=val+'s';
+  fetch('/set_pause_thresh/'+v);
+}
+
+function setMaxBurst(v){
+  document.getElementById('maxBurstVal').textContent=v;
+  fetch('/set_max_burst/'+v);
+}
+
 function autoTune(){
   var btn=document.querySelector('[onclick=\"autoTune()\"]');
   var orig=btn.textContent; btn.textContent='扫描中…'; btn.disabled=true;
@@ -1691,6 +1730,27 @@ function poll(){
       if(document.activeElement!==sl){
         sl.value=s.scan_amp;
         document.getElementById('scanAmpVal').textContent=s.scan_amp;
+      }
+    }
+    // Sync timing sliders
+    if(s.min_interval!=null && document.getElementById('minIntervalVal')){
+      var mi=Math.round(s.min_interval*100);
+      var misl=document.getElementById('minIntervalSlider');
+      if(document.activeElement!==misl){
+        misl.value=mi; document.getElementById('minIntervalVal').textContent=s.min_interval.toFixed(2)+'s';
+      }
+    }
+    if(s.pause_threshold!=null && document.getElementById('pauseThreshVal')){
+      var pt=Math.round(s.pause_threshold*10);
+      var ptsl=document.getElementById('pauseThreshSlider');
+      if(document.activeElement!==ptsl){
+        ptsl.value=pt; document.getElementById('pauseThreshVal').textContent=s.pause_threshold.toFixed(1)+'s';
+      }
+    }
+    if(s.max_burst!=null && document.getElementById('maxBurstVal')){
+      var mbsl=document.getElementById('maxBurstSlider');
+      if(document.activeElement!==mbsl){
+        mbsl.value=s.max_burst; document.getElementById('maxBurstVal').textContent=s.max_burst;
       }
     }
 
@@ -1950,6 +2010,33 @@ class WebHandler(BaseHTTPRequestHandler):
                 self.send_json({"ok": True, "speed": spd})
             except:
                 self.send_json({"ok": False, "msg": "无效速度值"})
+        elif p.path.startswith("/set_min_interval/"):
+            try:
+                v = int(p.path.split("/")[-1])  # centiseconds
+                sec = max(10, min(100, v)) / 100.0
+                self.balancer.min_interval = sec
+                self.balancer.add_log(f"⏱ 最小间隔设为 {sec:.2f}s")
+                self.send_json({"ok": True, "min_interval": round(sec, 2)})
+            except:
+                self.send_json({"ok": False, "msg": "无效间隔值"})
+        elif p.path.startswith("/set_pause_thresh/"):
+            try:
+                v = int(p.path.split("/")[-1])  # deciseconds
+                sec = max(1, min(60, v)) / 10.0
+                self.balancer.pause_threshold = sec
+                self.balancer.add_log(f"⏸ 长暂停阈值设为 {sec:.1f}s")
+                self.send_json({"ok": True, "pause_threshold": round(sec, 1)})
+            except:
+                self.send_json({"ok": False, "msg": "无效阈值"})
+        elif p.path.startswith("/set_max_burst/"):
+            try:
+                v = int(p.path.split("/")[-1])
+                v = max(1, min(12, v))
+                self.balancer.max_burst = v
+                self.balancer.add_log(f"🔁 最长Burst设为 {v}")
+                self.send_json({"ok": True, "max_burst": v})
+            except:
+                self.send_json({"ok": False, "msg": "无效burst值"})
         elif p.path == "/diag_channels":
             if not self.balancer.ser or not self.balancer.ser.is_open:
                 self.send_json({"ok": False, "msg": "手环未连接"})

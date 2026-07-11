@@ -138,6 +138,57 @@
             android:gravity="end" />
     </LinearLayout>
 
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp">
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="⏱ 最小间隔 " android:textColor="#0f8" android:textSize="10sp" />
+        <SeekBar android:id="@+id/minIntervalSlider"
+            android:layout_width="0dp" android:layout_height="20dp" android:layout_weight="1"
+            android:max="90" android:progress="39" android:thumbTint="#0f8" />
+        <TextView android:id="@+id/minIntervalLabel"
+            android:layout_width="42dp" android:layout_height="wrap_content"
+            android:text="0.49s" android:textColor="#aaa" android:textSize="10sp" android:gravity="end" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp">
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="⏸ 长暂停 " android:textColor="#ffcc44" android:textSize="10sp" />
+        <SeekBar android:id="@+id/pauseThreshSlider"
+            android:layout_width="0dp" android:layout_height="20dp" android:layout_weight="1"
+            android:max="59" android:progress="9" android:thumbTint="#ffcc44" />
+        <TextView android:id="@+id/pauseThreshLabel"
+            android:layout_width="38dp" android:layout_height="wrap_content"
+            android:text="1.0s" android:textColor="#aaa" android:textSize="10sp" android:gravity="end" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp">
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="🔁 最长Burst " android:textColor="#ff8866" android:textSize="10sp" />
+        <SeekBar android:id="@+id/maxBurstSlider"
+            android:layout_width="0dp" android:layout_height="20dp" android:layout_weight="1"
+            android:max="11" android:progress="7" android:thumbTint="#ff8866" />
+        <TextView android:id="@+id/maxBurstLabel"
+            android:layout_width="24dp" android:layout_height="wrap_content"
+            android:text="8" android:textColor="#aaa" android:textSize="10sp" android:gravity="end" />
+    </LinearLayout>
+
     <ProgressBar
         android:id="@+id/progress"
         style="@style/Widget.AppCompat.ProgressBar.Horizontal"

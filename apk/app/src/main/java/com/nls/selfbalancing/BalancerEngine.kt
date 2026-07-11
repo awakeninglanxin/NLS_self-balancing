@@ -207,6 +207,9 @@ class BalancerEngine(private val ctx: Context) {
     var algoMode: String = "ab"  // legacy / yinyang / fusion / schumann / water / ab
     var excludeOriginal: Boolean = false  // 一键排除/包括 🔗原版 算法
     var treatSpeed: Float = 1f  // 治疗时间周期倍数 1~12
+    var minInterval: Float = 0.49f  // 最小命令间隔 (0.1~1s, 默认0.49s)
+    var pauseThreshold: Float = 1.0f  // 长暂停阈值 (0.1~6s, 默认1s)
+    var maxBurst: Int = 8  // 最长连续同频burst (1~12, 默认8)
     private var algoQueue = mutableListOf<String>()
     private var batchNum = 0
     private var baseline = mutableMapOf<Int, Double>()
@@ -344,8 +347,8 @@ class BalancerEngine(private val ctx: Context) {
 
     private fun Band.freqStr(): String = if (freqKhz >= 1000) "%.2fMHz".format(freqKhz / 1000.0) else "${freqKhz}kHz"
 
-    /** 治疗延时 = 基础毫秒 × treatSpeed倍数 */
-    private fun treatMs(ms: Long): Long = (ms * treatSpeed).toLong()
+    /** 治疗延时 = max(minInterval*1000, 基础毫秒 × treatSpeed) */
+    private fun treatMs(ms: Long): Long = maxOf((minInterval * 1000).toLong(), (ms * treatSpeed).toLong())
 
     private fun sendProbe(b9: Int, b11: Int, b15: Int, b13: Int = b9) {
         buf.fill(0)

@@ -183,6 +183,41 @@ class MainActivity : AppCompatActivity() {
             override fun onStartTrackingTouch(s: SeekBar?) {}
             override fun onStopTrackingTouch(s: SeekBar?) {}
         })
+
+        val minIntervalSlider = findViewById<SeekBar>(R.id.minIntervalSlider)
+        val minIntervalLabel = findViewById<TextView>(R.id.minIntervalLabel)
+        minIntervalSlider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(s: SeekBar, v: Int, fromUser: Boolean) {
+                val sec = (v + 10) / 100f  // v=0→0.10s, v=90→1.00s
+                ensureEngine()?.let { it.minInterval = sec }
+                minIntervalLabel.text = "%.2fs".format(sec)
+            }
+            override fun onStartTrackingTouch(s: SeekBar?) {}
+            override fun onStopTrackingTouch(s: SeekBar?) {}
+        })
+
+        val pauseThreshSlider = findViewById<SeekBar>(R.id.pauseThreshSlider)
+        val pauseThreshLabel = findViewById<TextView>(R.id.pauseThreshLabel)
+        pauseThreshSlider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(s: SeekBar, v: Int, fromUser: Boolean) {
+                val sec = (v + 1) / 10f  // v=0→0.1s, v=59→6.0s
+                ensureEngine()?.let { it.pauseThreshold = sec }
+                pauseThreshLabel.text = "%.1fs".format(sec)
+            }
+            override fun onStartTrackingTouch(s: SeekBar?) {}
+            override fun onStopTrackingTouch(s: SeekBar?) {}
+        })
+
+        val maxBurstSlider = findViewById<SeekBar>(R.id.maxBurstSlider)
+        val maxBurstLabel = findViewById<TextView>(R.id.maxBurstLabel)
+        maxBurstSlider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(s: SeekBar, v: Int, fromUser: Boolean) {
+                ensureEngine()?.let { it.maxBurst = v + 1 }
+                maxBurstLabel.text = "${v + 1}"
+            }
+            override fun onStartTrackingTouch(s: SeekBar?) {}
+            override fun onStopTrackingTouch(s: SeekBar?) {}
+        })
     }
 
     private fun buildTabHost() {
