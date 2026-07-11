@@ -298,6 +298,8 @@ class MainActivity : AppCompatActivity() {
         val svc = service ?: return
         val eng = ensureEngine() ?: return
         if (eng.isPlaying) { svc.stop(); updateUI(); return }
+        if (!eng.isConnected) { addLog("⚠ 请先连接手环"); return }
+        if (!eng.isCalibrated) { addLog("⚠ 请先校准传感器"); return }
         // 通过 engine 启动平衡（service 管理 WakeLock）
         eng.startBalance()
         // 平衡启动后获取 WakeLock + 前台通知

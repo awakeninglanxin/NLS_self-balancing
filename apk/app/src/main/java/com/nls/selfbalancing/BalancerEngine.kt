@@ -22,6 +22,7 @@ class BalancerEngine(private val ctx: Context) {
     private var epIn: UsbEndpoint? = null
     private var device: UsbDevice? = null
     private var job: Job? = null
+    private var calibJob: Job? = null
     private val buf = ByteArray(128)
 
     var onStatus: ((String) -> Unit)? = null
@@ -49,6 +50,7 @@ class BalancerEngine(private val ctx: Context) {
                     if (isPlaying) {
                         isPlaying = false
                         job?.cancel()
+                        calibJob?.cancel()
                         onLog?.invoke("⚠ 手环已断开! 请重新连接并校准后再次启动")
                         onStatus?.invoke("手环已断开")
                     }
@@ -218,20 +220,21 @@ class BalancerEngine(private val ctx: Context) {
 
     fun calibrate(callback: (Boolean, String) -> Unit) {
         if (!isConnected) { callback(false, "⚠ 请先连接手环"); return }
+        if (epIn == null || epOut == null) { callback(false, "⚠ USB端点未就绪, 请重新连接"); return }
         val h = Handler(Looper.getMainLooper())
-        Thread {
+        calibJob = CoroutineScope(Dispatchers.IO).launch {
             try {
                 for (band in bands) {
                     val raw: Double = probe(band.b9)
                     baseline[band.b9] = raw
-                    Thread.sleep(20)
+                    delay(20)
                 }
                 isCalibrated = true
                 h.post { onLog?.invoke("✅ 校准完成: ${baseline.size}频段 (PCAP振幅)"); callback(true, "✅ 校准完成") }
             } catch (e: Exception) {
                 h.post { callback(false, "校准失败: ${e.message}") }
             }
-        }.start()
+        }
     }
 
     fun startBalance() {
@@ -365,7 +368,7 @@ class BalancerEngine(private val ctx: Context) {
             buf[11] = minOf(172, (buf[11].toInt() and 0xFF) + powerBoost).toByte()
             buf[15] = minOf(172, (buf[15].toInt() and 0xFF) + powerBoost).toByte()
         }
-        flushBuf()
+        try { connection?.bulkTransfer(epOut, buf, buf.size, 1000) } catch (_: Exception) {}
     }
 
     /** 使用PCAP振幅映射发送探针(检测模式: CH1≠CH2振幅) */
@@ -378,7 +381,7 @@ class BalancerEngine(private val ctx: Context) {
             sendPcapProbe(b9)
             Thread.sleep(80)
             val inBuf = ByteArray(256)
-            val r = connection?.bulkTransfer(epIn, inBuf, inBuf.size, 100) ?: 0
+            val r = connection?.bulkTransfer(epIn, inBuf, inBuf.size, 500) ?: 0
             if (r < 2) return 105.0
             // 取前132字节(跳过包头)的均值→值域偏移
             var sum = 0.0; var cnt = 0
@@ -603,6 +606,7 @@ class BalancerEngine(private val ctx: Context) {
     fun stop() {
         isPlaying = false
         job?.cancel(); job = null
+        calibJob?.cancel(); calibJob = null
         try {
             val zero = ByteArray(128)
             connection?.bulkTransfer(epOut, zero, zero.size, 500)
