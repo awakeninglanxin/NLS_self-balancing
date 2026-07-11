@@ -14,7 +14,7 @@ PHASE_FILE = os.path.join(os.path.dirname(__file__), "nls_phase.json")
 # 原版算法指纹（多用户, 从PCAP逆推, 换人→重新生成→重启即生效）
 from algo_fingerprint import ALL_FINGERPRINTS, FINGERPRINT
 PERSONS = list(ALL_FINGERPRINTS.keys())  # ["丽梦儿", "蔡明琦", ...]
-CURRENT_PERSON = PERSONS[0] if PERSONS else "默认"  # 当前选中的人
+CURRENT_PERSON = "蔡明琦"  # 默认人选
 B9_RANGE = range(14, 32)  # 实际抓包范围 14~31，对应 7.37MHz~20.4kHz
 
 # ── Koldas 五大启发 ──
@@ -105,13 +105,14 @@ class Balancer:
         self._algo_queue = []
         self._batch_num = 0
         self._pending_start = False  # 校准完成前点了开始→排队标记
-        self.scan_amp = 20  # 扫描振幅 (3-80), 默认20比原15更敏感
+        self.scan_amp = 15  # 内部后备值(应从PCAP读取,这个仅作fallback)
         self.per_b9_amp = {}  # {b9: amp} 每个频段的独立最优振幅 (auto_tune填充)
         self.treat_speed = 1.0  # 治疗时间周期倍数 1~12
-        self.min_interval = 0.49  # 最小命令间隔 (0.1~1s, 默认0.49s=PCAP实测)
-        self.pause_threshold = 1.0  # 长暂停阈值 (0.1~6s, 默认1s)
-        self.max_burst = 8  # 最长连续同频burst (1~12, 默认8)
+        self.min_interval = 0.1  # 最小命令间隔 (0.1~1s)
+        self.pause_threshold = 0.1  # 长暂停阈值 (0.1~6s)
+        self.max_burst = 1  # 最长连续同频burst (1~12)
         self.power_boost = 0  # 全局功率偏移 (+0~+5)
+        self.exclude_original = False  # 多维轮转是否排除原版
         # 加载上次校准的基线 (持久化, 无需每次重校)
         self.baseline_age = 0  # 基线年龄(秒), 用于提示过期
         self.status = {
@@ -121,13 +122,13 @@ class Balancer:
             "has_baseline": False,
             "baseline_age": 0,  # 基线年龄(小时)
             "has_2d_baseline": False,
-            "scan_amp": self.scan_amp,
             "min_interval": self.min_interval,
             "pause_threshold": self.pause_threshold,
             "max_burst": self.max_burst,
             "power_boost": self.power_boost,
             "per_b9_amp": self.per_b9_amp,
             "algo": "ab",
+            "current_algo": "",
             "ab_original": {"imp": 0, "wors": 0, "rounds": 0},
             "ab_legacy": {"imp": 0, "wors": 0, "rounds": 0},
             "ab_yinyang": {"imp": 0, "wors": 0, "rounds": 0},
@@ -136,6 +137,8 @@ class Balancer:
             "ab_water": {"imp": 0, "wors": 0, "rounds": 0},
             "ab_jellium": {"imp": 0, "wors": 0, "rounds": 0},
             "ab_multiharm": {"imp": 0, "wors": 0, "rounds": 0},
+            "ab_wuyin": {"imp": 0, "wors": 0, "rounds": 0},
+            "ab_septet": {"imp": 0, "wors": 0, "rounds": 0},
             "coupling": 50, "spectral_entropy": 0.5,
             "ridges": {},  # 频谱脊线数据 {b9: amplitude}
         }
@@ -182,7 +185,9 @@ class Balancer:
             if len(self.status["log"]) > 50:
                 self.status["log"].pop()
 
-    def probe(self, b9, b11=15):
+    def probe(self, b9, b11=None):
+        if b11 is None:
+            b11 = self._pcap_amp(b9)  # 从PCAP指纹读取
         if not self.ser or not self.ser.is_open:
             return [100] * 256
         try:
@@ -194,7 +199,7 @@ class Balancer:
                 return [100] * 256
             time.sleep(0.08)
             return list(self.ser.read(256))
-        except (serial.SerialException, OSError) as e:
+        except (serial.SerialException, OSError, AttributeError) as e:
             self.status["connected"] = False
             if self.ser:
                 try: self.ser.close()
@@ -202,8 +207,13 @@ class Balancer:
                 self.ser = None
             return [100] * 256
 
-    def probe_2d(self, b9, b13, b11=15, b15=15):
-        """双通道探头: 同时指定CH1频率(b9)和CH2频率(b13)"""
+    def probe_2d(self, b9, b13, b11=None, b15=None):
+        """双通道探头: 同时指定CH1频率(b9)和CH2频率(b13)
+        b9≠b13时设备可能返回141B短包(异频模式), 需特殊处理"""
+        if b11 is None:
+            b11 = self._pcap_amp(b9)
+        if b15 is None:
+            b15 = self._pcap_amp_ch2(b13)
         if not self.ser or not self.ser.is_open:
             return [100] * 256
         try:
@@ -213,15 +223,43 @@ class Balancer:
             if not self._safe_write(cmd):
                 self.add_log("⚠ 写入失败，设备可能断开")
                 return [100] * 256
-            time.sleep(0.08)
-            return list(self.ser.read(256))
-        except (serial.SerialException, OSError) as e:
+            time.sleep(0.12)  # 异频模式需要更长响应时间
+            resp = list(self.ser.read(256))
+            # 同频模式应返回256B; 异频(b9≠b13)可能返回141B短包
+            if len(resp) < 256 and b9 != b13:
+                # 尝试追加读取剩余数据
+                tail = list(self.ser.read(256 - len(resp)))
+                resp += tail
+            if len(resp) >= 100:
+                # 有足够数据: 填充到256B, 用已有数据的均值
+                mean_val = int(sum(resp) / len(resp))
+                resp = resp[:256] + [mean_val] * max(0, 256 - len(resp))
+                return resp[:256]
+            return [100] * 256
+        except (serial.SerialException, OSError, AttributeError) as e:
             self.status["connected"] = False
             if self.ser:
                 try: self.ser.close()
                 except: pass
                 self.ser = None
             return [100] * 256
+
+    def _wuxing_corr(self, wuxing):
+        """五行修正系数: 火最活跃(1.5), 水最惰(0.8)"""
+        return {"火": 1.5, "金": 1.2, "木": 1.0, "土": 1.0, "水": 0.8}.get(wuxing, 1.0)
+
+    def _pcap_amp(self, b9):
+        """从PCAP指纹读取当前选中人的per-b9振幅(CH1), 替代硬编码15"""
+        fp = ALL_FINGERPRINTS.get(CURRENT_PERSON, FINGERPRINT)
+        ch1_by_b9 = fp.get("ch1_per_b9", {})
+        ch1_baseline = fp.get("ch1_baseline", 57)
+        return int(ch1_by_b9.get(str(b9), ch1_baseline))
+
+    def _pcap_amp_ch2(self, b13):
+        """从PCAP指纹读取当前选中人的per-b13振幅(CH2)"""
+        fp = ALL_FINGERPRINTS.get(CURRENT_PERSON, FINGERPRINT)
+        ch2_by_b13 = fp.get("ch2_per_b13", {})
+        return int(ch2_by_b13.get(str(b13), 59))
 
     def test_b13_blindspot(self):
         """定性验证: b9=29时不同b13的传感器响应差异
@@ -234,7 +272,7 @@ class Balancer:
                 results[f"29/{b13}"] = {"avg": 0, "status": "断连"}
                 continue
             time.sleep(0.2)
-            resp = self.probe_2d(29, b13, b11=self.scan_amp, b15=self.scan_amp)
+            resp = self.probe_2d(29, b13)  # PCAP振幅
             if len(resp) == 256:
                 avg = round(sum(resp) / 256, 1)
                 results[f"29/{b13}"] = {"avg": avg, "raw_len": len(resp)}
@@ -272,7 +310,7 @@ class Balancer:
                         self.calibrating = False
                         return {"ok": False, "msg": "设备断开"}
                     time.sleep(0.05)
-                    resp = self.probe_2d(b9, b13, b11=self.scan_amp, b15=self.scan_amp)
+                    resp = self.probe_2d(b9, b13)  # PCAP振幅
                     key = f"{b9}/{b13}"
                     avg = round(sum(resp) / 256, 1) if len(resp) == 256 else 105.0
                     if key not in self.baseline_2d:
@@ -291,12 +329,9 @@ class Balancer:
             self.calibrating = False
 
     def _safe_write(self, cmd):
-        """安全写命令，自动应用功率偏移"""
+        """安全写命令，不加功率偏移(扫描用)"""
         try:
             if self.ser and self.ser.is_open:
-                if self.power_boost > 0:
-                    cmd[11] = min(172, cmd[11] + self.power_boost)
-                    cmd[15] = min(172, cmd[15] + self.power_boost)
                 self.ser.write(bytes(cmd))
                 return True
         except (serial.SerialException, OSError):
@@ -306,6 +341,13 @@ class Balancer:
                 except: pass
                 self.ser = None
         return False
+
+    def _treat_write(self, cmd):
+        """治疗写命令，自动叠加功率偏移"""
+        if self.power_boost > 0:
+            cmd[11] = min(172, cmd[11] + self.power_boost)
+            cmd[15] = min(172, cmd[15] + self.power_boost)
+        return self._safe_write(cmd)
 
     # ── 音频反馈 (432Hz调律, 仿AudioTone) ──
     @staticmethod
@@ -333,8 +375,7 @@ class Balancer:
         deltas = {}
         raw_vals = {}  # 用于耦合度计算
         for b9 in B9_RANGE:
-            amp = self.per_b9_amp.get(b9, self.scan_amp)  # per-b9优先
-            resp = self.probe(b9, amp)
+            resp = self.probe(b9)  # 自动从PCAP指纹取振幅
             if len(resp) == 256:
                 avg = sum(resp) / 256
                 bl = self.baseline.get(b9, 105)
@@ -372,11 +413,13 @@ class Balancer:
             # ③ 功率非线性NI(f) — 测3个代表性频段 (低/中/高)
             ni_map = {}
             for probe_b9 in [5, 17, 29]:
+                if not self.ser or not self.ser.is_open: break
                 self.ser.reset_input_buffer()
                 cmd_lo = bytearray(128); cmd_lo[9]=probe_b9; cmd_lo[11]=10; cmd_lo[13]=probe_b9; cmd_lo[15]=10
                 self._safe_write(cmd_lo); time.sleep(0.08)
                 r_lo = list(self.ser.read(256)) if self.ser else [100]*256
                 cmd_hi = bytearray(128); cmd_hi[9]=probe_b9; cmd_hi[11]=40; cmd_hi[13]=probe_b9; cmd_hi[15]=40
+                if not self.ser or not self.ser.is_open: continue
                 self.ser.reset_input_buffer()
                 self._safe_write(cmd_hi); time.sleep(0.08)
                 r_hi = list(self.ser.read(256)) if self.ser else [100]*256
@@ -387,7 +430,7 @@ class Balancer:
             avg_ni = round(sum(v["ni"] for v in ni_map.values()) / max(1, len(ni_map)), 3)
             # ④ 频点自注意力权重: delta大的频点权重大
             max_d = max(abs(d) for d in deltas.values()) if deltas else 1
-            attn_weights = {str(b9): round(abs(d)/max_d, 2) for b9, d in sorted(deltas.items(), key=lambda x: -abs(x[1]))[:5]}
+            attn_weights = {str(b9): round(abs(d)/max(max_d, 1), 2) for b9, d in sorted(deltas.items(), key=lambda x: -abs(x[1]))[:5]}
             with self._lock:
                 self.status["coupling"] = coupling
                 self.status["spectral_entropy"] = round(spec_entropy, 3)
@@ -418,7 +461,7 @@ class Balancer:
         for b9, delta in sorted(deltas.items(), key=lambda x: -abs(x[1])):
             if abs(delta) < 4: continue
             organ, _, wuxing = B9_MAP.get(b9, ('?', '?', '土'))
-            corr = WUXING_CORRECTION.get(wuxing, 1.0)
+            corr = 1.0  # PCAP振幅比已编码器官差异, 无需人工五行系数
             adjust = min(int(abs(delta) * 0.5 * corr), 60)
             ph = self.phase_calib.get(str(b9), {})
             ph_boost = 0.6 if ph.get("grade") in ("强相消", "中相消") else 1.0
@@ -431,7 +474,7 @@ class Balancer:
             if self.ser and self.ser.is_open:
                 cmd = bytearray(128)
                 cmd[9] = b9; cmd[11] = b11; cmd[13] = ch2_b9; cmd[15] = b15
-                self._safe_write(cmd)
+                self._treat_write(cmd)
             balanced.append({"b9": b9, "organ": organ, "delta": delta,
                 "direction": "↓" if delta > 0 else "↑",
                 "ch1b9": b9, "ch1amp": b11, "ch2b9": ch2_b9, "ch2amp": b15})
@@ -454,16 +497,16 @@ class Balancer:
             if abs(delta) < 4:
                 continue
             organ, _, wuxing = B9_MAP.get(b9, ('?', '?', '土'))
-            corr = WUXING_CORRECTION.get(wuxing, 1.0)
+            corr = 1.0  # PCAP振幅比已编码器官差异, 无需人工五行系数
 
-            # 按器官查表调振幅（12维指纹第4维: ch1_per_b9）
-            b9_amp = ch1_by_b9.get(str(b9), ch1_by_b9.get(b9, ch1_baseline))
+            # 按器官查表调振幅（PCAP指纹）
+            b9_amp = self._pcap_amp(b9)
             amp_factor = b9_amp / max(1, ch1_baseline)  # >1=超均值推力, <1=降功率
             adjust = min(int(abs(delta) * 0.5 * corr * amp_factor), 60)
 
-            # 振幅地基: 反相, CH1边界用PCAP实测范围
-            b11 = max(ch1_lo, 15 - adjust) if delta > 0 else min(ch1_hi, 15 + adjust)
-            b15 = min(ch1_hi, 15 + adjust) if delta > 0 else max(ch1_lo, 15 - adjust)
+            # 振幅地基: 反相, 用PCAP实际振幅替代硬编码15
+            b11 = max(ch1_lo, b9_amp - adjust) if delta > 0 else min(ch1_hi, b9_amp + adjust)
+            b15 = min(ch1_hi, b9_amp + adjust) if delta > 0 else max(ch1_lo, b9_amp - adjust)
 
             # 同频/异频: 用b9 hash模拟PCAP实测比例
             is_same = (abs(hash(str(b9))) % 100) < same_pct
@@ -480,7 +523,7 @@ class Balancer:
                 cmd = bytearray(128)
                 cmd[9] = ch1_b9; cmd[11] = b11
                 cmd[13] = ch2_b9; cmd[15] = b15
-                self._safe_write(cmd)
+                self._treat_write(cmd)
 
             mode_tag = "同频" if is_same else "异频"
             balanced.append({
@@ -501,7 +544,7 @@ class Balancer:
             if abs(delta) < 4:
                 continue
             organ, _, wuxing = B9_MAP.get(b9, ('?', '?', '土'))
-            corr = WUXING_CORRECTION.get(wuxing, 1.0)
+            corr = 1.0  # PCAP振幅比已编码器官差异, 无需人工五行系数
             adjust = min(int(abs(delta) * 0.5 * corr), 60)
 
             # 真实谐波频率: 不钳位, 使用完整 2^n 和 Fibonacci
@@ -517,7 +560,7 @@ class Balancer:
                 cmd = bytearray(128)
                 cmd[9] = sun_b9; cmd[11] = sun_amp
                 cmd[13] = moon_b9; cmd[15] = moon_amp
-                self._safe_write(cmd)
+                self._treat_write(cmd)
 
             balanced.append({
                 "b9": b9, "organ": organ, "delta": delta,
@@ -536,7 +579,7 @@ class Balancer:
             if abs(delta) < 4:
                 continue
             organ, _, wuxing = B9_MAP.get(b9, ('?', '?', '土'))
-            corr = WUXING_CORRECTION.get(wuxing, 1.0)
+            corr = 1.0  # PCAP振幅比已编码器官差异, 无需人工五行系数
             adjust = min(int(abs(delta) * 0.5 * corr), 60)
 
             # 阴阳权重: 太阳(CH1推力) 太阴(CH2拉力)
@@ -561,7 +604,7 @@ class Balancer:
                 cmd = bytearray(128)
                 cmd[9] = b9; cmd[11] = b11
                 cmd[13] = c2; cmd[15] = b15
-                self._safe_write(cmd)
+                self._treat_write(cmd)
 
             balanced.append({
                 "b9": b9, "organ": organ, "delta": delta,
@@ -584,7 +627,7 @@ class Balancer:
                 cmd = bytearray(128)
                 cmd[9] = sch_b9; cmd[11] = weak_amp
                 cmd[13] = ch2_b9; cmd[15] = weak_amp
-                self._safe_write(cmd)
+                self._treat_write(cmd)
             balanced.append({"b9": b9, "organ": organ, "delta": delta, "direction": "⚓",
                 "ch1b9": sch_b9, "ch1amp": 15, "ch2b9": ch2_b9, "ch2amp": 15})
             time.sleep(0.08)
@@ -603,7 +646,7 @@ class Balancer:
                     cmd = bytearray(128)
                     cmd[9]=b9; cmd[11]=ch1_amp; cmd[13]=b9; cmd[15]=ch2_amp
                     self.ser.reset_input_buffer()
-                    self._safe_write(cmd); time.sleep(0.12)
+                    self._treat_write(cmd); time.sleep(0.12)
                     r = list(self.ser.read(256)) if self.ser else [100]*256
                     if len(r) == 256: return r
                 return r
@@ -670,7 +713,7 @@ class Balancer:
             if self.ser and self.ser.is_open:
                 cmd = bytearray(128)
                 cmd[9]=b9; cmd[11]=b11; cmd[13]=ch2_b9; cmd[15]=b15
-                self._safe_write(cmd)
+                self._treat_write(cmd)
             balanced.append({"b9":b9,"organ":organ,"delta":delta,"direction":"💧",
                 "ch1b9":b9, "ch1amp":b11, "ch2b9":ch2_b9, "ch2amp":b15})
             time.sleep(0.08)
@@ -707,7 +750,7 @@ class Balancer:
             if self.ser and self.ser.is_open:
                 cmd = bytearray(128)
                 cmd[9]=b9; cmd[11]=b11; cmd[13]=ch2_b9; cmd[15]=b15
-                self._safe_write(cmd)
+                self._treat_write(cmd)
             balanced.append({"b9":b9,"organ":organ,"delta":delta,"direction":"⚛",
                 "ch1b9":b9, "ch1amp":b11, "ch2b9":ch2_b9, "ch2amp":b15})
             time.sleep(0.08)
@@ -726,7 +769,7 @@ class Balancer:
         for b9, delta in sorted(deltas.items(), key=lambda x: -abs(x[1])):
             if abs(delta) < 3: continue
             organ, _, wuxing = B9_MAP.get(b9, ('?', '?', '土'))
-            corr = WUXING_CORRECTION.get(wuxing, 1.0)
+            corr = 1.0  # PCAP振幅比已编码器官差异, 无需人工五行系数
             adjust = min(int(abs(delta) * 0.5 * corr), 60)
             b11_base = max(3, 15 - adjust) if delta > 0 else min(172, 15 + adjust)
             b15_base = min(172, 15 + adjust) if delta > 0 else max(3, 15 - adjust)
@@ -738,7 +781,7 @@ class Balancer:
                 if self.ser and self.ser.is_open:
                     cmd = bytearray(128)
                     cmd[9]=ch1b9; cmd[11]=ch1amp; cmd[13]=ch2b9; cmd[15]=ch2amp
-                    self._safe_write(cmd)
+                    self._treat_write(cmd)
                 if i < 4: time.sleep(0.04)
             balanced.append({"b9":b9,"organ":organ,"delta":delta,"direction":"🎵",
                 "ch1b9": ch1b9, "ch1amp": ch1amp, "ch2b9": ch2b9, "ch2amp": ch2amp, "count": 5})
@@ -769,7 +812,7 @@ class Balancer:
             if self.ser and self.ser.is_open:
                 cmd = bytearray(128)
                 cmd[9]=ch1b9; cmd[11]=b11; cmd[13]=ch2b9; cmd[15]=b15
-                self._safe_write(cmd)
+                self._treat_write(cmd)
             balanced.append({"b9":b9,"organ":organ,"delta":delta,"direction":"🎵",
                 "ch1b9": ch1b9, "ch1amp": b11, "ch2b9": ch2b9, "ch2amp": b15})
             self.add_log(f"  🎵{label} {organ} CH1={ch1b9} CH2={ch2b9}")
@@ -807,9 +850,9 @@ class Balancer:
         for b9, delta in sorted(deltas.items(), key=lambda x: -abs(x[1]))[:12]:
             if abs(delta) < 4: continue
             organ, _, wuxing = B9_MAP.get(b9, ('?', '?', '土'))
-            corr = self._wuxing_corr(wuxing)
+            corr = 1.0  # PCAP振幅比已编码器官差异
             adjust = min(60, int(abs(delta) * 0.5 * corr))
-            base = self.cal_amp.get(str(b9), 15)
+            base = self._pcap_amp(b9)  # PCAP振幅
             c1, w1, c2, w2 = self._septet_mix(b9)
             if delta > 0:
                 b11 = max(3, base - int(adjust * w1))
@@ -820,7 +863,7 @@ class Balancer:
             if self.ser and self.ser.is_open:
                 cmd = bytearray(128)
                 cmd[9] = c1; cmd[11] = b11; cmd[13] = c2; cmd[15] = b15
-                self._safe_write(cmd)
+                self._treat_write(cmd)
             balanced.append({"b9":b9,"organ":organ,"delta":delta,"direction":"☀☽",
                 "ch1b9":c1,"ch1amp":b11,"ch2b9":c2,"ch2amp":b15})
             self.add_log(f"  ☀☽7族 {organ} CH1={c1}w={w1:.2f} CH2={c2}w={w2:.2f}")
@@ -860,11 +903,10 @@ class Balancer:
     def calibrate(self):
         self.calibrating = True
         try:
-            self.add_log(f"📐 校准基线中…传感器请悬空 (振幅={self.scan_amp})")
+            self.add_log(f"📐 校准基线中…传感器请悬空 (振幅=PCAP)")
             raw = {}
             for b9 in B9_RANGE:
-                amp = self.per_b9_amp.get(b9, self.scan_amp)  # per-b9优先
-                resp = self.probe(b9, amp)
+                resp = self.probe(b9)  # 自动从PCAP指纹取振幅
                 raw[b9] = round(sum(resp) / len(resp), 1) if len(resp) == 256 else 105.0
             self.baseline = raw
             with open(BASELINE_FILE, 'w') as f:
@@ -988,23 +1030,14 @@ class Balancer:
                 break
             time.sleep(0.3)
             try:
-                # 使用probe但覆写CH2参数
-                cmd = bytearray(128)
-                cmd[9]=ch1b9; cmd[11]=ch1amp; cmd[13]=ch2b9; cmd[15]=ch2amp
-                self.ser.reset_input_buffer()
-                if not self._safe_write(cmd):
-                    self.add_log(f"  {label}: ⚠ 写入失败")
-                    continue
-                time.sleep(0.08)
-                resp = list(self.ser.read(256))
-                if len(resp) == 256:
-                    avg = round(sum(resp)/256, 1)
-                    rms = round((sum((b-128)**2 for b in resp)/256)**0.5, 1)
-                    high = sum(1 for b in resp if b > 150)
-                    results.append({"label": label, "avg": avg, "rms": rms, "high": high})
-                    self.add_log(f"  {label}: avg={avg:.1f} RMS={rms:.1f} 高位={high}")
-                else:
-                    self.add_log(f"  {label}: ⚠ 响应长度{len(resp)}≠256")
+                # 用probe_2d(已处理短包), 它自动补齐到256B
+                resp = self.probe_2d(ch1b9, ch2b9, b11=ch1amp, b15=ch2amp)
+                avg = round(sum(resp)/256, 1)
+                rms = round((sum((b-128)**2 for b in resp)/256)**0.5, 1)
+                high = sum(1 for b in resp if b > 150)
+                results.append({"label": label, "avg": avg, "rms": rms, "high": high})
+                raw_len = min(256, len([b for b in resp if b != resp[0]] or [0]))  # 估计实际响应长度
+                self.add_log(f"  {label}: avg={avg:.1f} RMS={rms:.1f} 高位={high}")
             except Exception as e:
                 self.add_log(f"  {label}: ❌ {e}")
         if len(results) >= 2:
@@ -1039,7 +1072,6 @@ class Balancer:
                     self.status["deltas"] = {}
 
                 # 第1步：扫描
-                self.add_log(f"🔍 第{round_num}轮 扫描中…")
                 deltas = self.scan()
                 if not self.status["connected"] and not deltas:
                     self.add_log("⚠ 手环已断开，自动停止并保存")
@@ -1052,12 +1084,16 @@ class Balancer:
                     self.status["deltas"] = self.status["deltas"]  # 已实时填充
 
                 if abn:
-                    algo = self.status.get("algo", "yinyang")
+                    algo = "ab"  # 始终多维轮转
                     # 八维交替: 随机打乱每批出场顺序
                     if algo == "ab":
                         if not self._algo_queue:
                             self._batch_num += 1
-                            self._algo_queue = ["original", "legacy", "yinyang", "fusion", "schumann", "water", "jellium", "multiharm", "wuyin", "septet"]
+                            full_q = ["original", "legacy", "yinyang", "fusion", "schumann", "water", "jellium", "multiharm", "wuyin", "septet"]
+                            if self.exclude_original:
+                                self._algo_queue = [a for a in full_q if a != "original"]
+                            else:
+                                self._algo_queue = list(full_q)
                             random.shuffle(self._algo_queue)
                             batch_labels = [({"original": "🔗原版", "legacy": "同频反相", "yinyang": "☀☽双频", "fusion": "⚡融合", "schumann": "🌍舒曼锚", "water": "💧水共振", "jellium": "⚛幻数", "multiharm": "🎵多谐波", "wuyin": "🎵五音", "septet": "☀☽7族混音"}[a]) for a in self._algo_queue]
                             self.add_log(f"─── 第{self._batch_num}遍: {' → '.join(batch_labels)} ───")
@@ -1071,7 +1107,7 @@ class Balancer:
                     organ_names = [B9_MAP.get(b9, ('?', '?', ''))[0] for b9, _ in abn_list[:5]]
                     algo_labels = {"original": "🔗原版", "legacy": "同频反相", "yinyang": "☀☽双频", "fusion": "⚡融合", "schumann": "🌍舒曼锚", "water": "💧水共振", "jellium": "⚛幻数", "multiharm": "🎵多谐波", "wuyin": "🎵五音", "septet": "☀☽7族混音"}
                     algo_label = algo_labels.get(use_algo, use_algo)
-                    self.add_log(f"  ⚡ {len(abn)}项异常: {', '.join(organ_names[:3])} [{algo_label}]")
+                    self.add_log(f"🔍 第{round_num}轮 [{algo_label}] ⚡{len(abn)}项异常: {', '.join(organ_names[:3])}")
 
                     if use_algo == "yinyang":
                         balanced = self.balance(deltas)
@@ -1212,7 +1248,7 @@ class Balancer:
         best = max([(p_org, "🔗原版"), (p_leg, "同频反相"), (p_yy, "☀☽双频"), (p_fus, "⚡融合"), (p_sch, "🌍舒曼锚"), (p_h2o, "💧水共振"), (p_jel, "⚛幻数")], key=lambda x: x[0])
 
         report = (
-            f"╔═══ NLS 九维算法对比报告 (第{self._batch_num}遍) ═══\n"
+            f"╔═══ NLS 多维算法对比报告 (第{self._batch_num}遍) ═══\n"
             f"║ 时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
             f"║ 耦合度: {coupling}/100\n"
             f"║────────────────────────────────────────────\n"
@@ -1308,9 +1344,9 @@ canvas{display:block;margin:0 auto;border-radius:8px}
 .overlay p{color:#aaa;font-size:13px;margin:8px 0;line-height:1.5}
 .overlay .btn{display:inline-block;margin-top:12px;padding:12px 32px;font-size:15px}
 </style></head><body>
-<div class="overlay" id="calOverlay">
+<div class="overlay hidden" id="calOverlay">
   <div class="box">
-    <h2>⚠ 每次启动需重新校准基线</h2>
+    <h2>📐 传感器基线校准</h2>
     <p>将手环<b style="color:#ff4444">完全悬空</b>（不接触任何皮肤/物体）<br>点击下方按钮开始自动扫描</p>
     <p style="font-size:11px;color:#f66">❗ 戴在手腕上校准 = 全部平衡，扫不出异常</p>
     <p style="font-size:11px;color:#666">手环需采集环境本底噪音<br>作为后续诊断的"零参考面"</p>
@@ -1334,7 +1370,7 @@ canvas{display:block;margin:0 auto;border-radius:8px}
 </div>
 <div class="card" style="padding:8px 12px">
   <div style="display:flex;justify-content:space-between;align-items:center">
-    <b>⚖ 九维对比</b>
+    <b>⚖ 多维对比</b>
     <span style="display:flex;align-items:center;gap:6px">
       <span id="baselineDot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#f44" title="基线状态"></span>
       <span id="baseline2dDot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#888" title="2D基线"></span>
@@ -1343,48 +1379,33 @@ canvas{display:block;margin:0 auto;border-radius:8px}
     </span>
   </div>
   <div style="display:flex;align-items:center;gap:6px;margin:4px 0">
-    <span style="font-size:10px;color:#888">灵敏度</span>
-    <input type="range" id="scanAmpSlider" min="3" max="80" value="20" style="flex:1;accent-color:#7c4dff;height:4px" oninput="setScanAmp(this.value)">
-    <span id="scanAmpVal" style="font-size:11px;color:#aaa;min-width:28px">20</span>
-    <button class="algo-btn" onclick="autoTune()" style="font-size:10px;padding:2px 8px;white-space:nowrap" title="自动扫10档振幅找最优性价比">🎯 一键最优</button>
-  </div>
-  <div style="display:flex;align-items:center;gap:6px;margin:4px 0">
     <span style="font-size:10px;color:#888">⚡治疗周期</span>
     <input type="range" id="speedSlider" min="1" max="12" value="1" style="flex:1;accent-color:#ff6600;height:4px" oninput="setSpeed(this.value)">
     <span id="speedVal" style="font-size:11px;color:#aaa;min-width:28px">×1</span>
   </div>
   <div style="display:flex;align-items:center;gap:6px;margin:3px 0">
     <span style="font-size:10px;color:#0f8">⏱ 最小间隔</span>
-    <input type="range" id="minIntervalSlider" min="10" max="100" value="49" style="flex:1;accent-color:#0f8;height:4px" oninput="setMinInterval(this.value)">
-    <span id="minIntervalVal" style="font-size:11px;color:#aaa;min-width:36px">0.49s</span>
+    <input type="range" id="minIntervalSlider" min="10" max="100" value="10" style="flex:1;accent-color:#0f8;height:4px" oninput="setMinInterval(this.value)">
+    <span id="minIntervalVal" style="font-size:11px;color:#aaa;min-width:36px">0.10s</span>
   </div>
   <div style="display:flex;align-items:center;gap:6px;margin:3px 0">
     <span style="font-size:10px;color:#ffcc44">⏸ 长暂停</span>
-    <input type="range" id="pauseThreshSlider" min="1" max="60" value="10" style="flex:1;accent-color:#ffcc44;height:4px" oninput="setPauseThreshold(this.value)">
-    <span id="pauseThreshVal" style="font-size:11px;color:#aaa;min-width:32px">1.0s</span>
+    <input type="range" id="pauseThreshSlider" min="1" max="60" value="1" style="flex:1;accent-color:#ffcc44;height:4px" oninput="setPauseThreshold(this.value)">
+    <span id="pauseThreshVal" style="font-size:11px;color:#aaa;min-width:32px">0.1s</span>
   </div>
   <div style="display:flex;align-items:center;gap:6px;margin:3px 0">
     <span style="font-size:10px;color:#ff8866">🔁 最长Burst</span>
-    <input type="range" id="maxBurstSlider" min="1" max="12" value="8" style="flex:1;accent-color:#ff8866;height:4px" oninput="setMaxBurst(this.value)">
-    <span id="maxBurstVal" style="font-size:11px;color:#aaa;min-width:22px">8</span>
+    <input type="range" id="maxBurstSlider" min="1" max="12" value="1" style="flex:1;accent-color:#ff8866;height:4px" oninput="setMaxBurst(this.value)">
+    <span id="maxBurstVal" style="font-size:11px;color:#aaa;min-width:22px">1</span>
   </div>
   <div style="display:flex;align-items:center;gap:6px;margin:3px 0">
     <span style="font-size:10px;color:#ff44aa">🔊 功率偏移</span>
     <input type="range" id="powerBoostSlider" min="0" max="5" value="0" style="flex:1;accent-color:#ff44aa;height:4px" oninput="setPowerBoost(this.value)">
     <span id="powerBoostVal" style="font-size:11px;color:#aaa;min-width:22px">+0</span>
   </div>
-  <div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap">
-    <button class="algo-btn" onclick="setAlgo('original')" id="abORG">🔗原版</button>
-    <button class="algo-btn" onclick="setAlgo('yinyang')" id="abYY">☀☽</button>
-    <button class="algo-btn" onclick="setAlgo('legacy')" id="abOLD">同频</button>
-    <button class="algo-btn" onclick="setAlgo('fusion')" id="abFUS">⚡融合</button>
-    <button class="algo-btn" onclick="setAlgo('schumann')" id="abSCH">🌍锚</button>
-    <button class="algo-btn" onclick="setAlgo('water')" id="abH2O">💧水</button>
-    <button class="algo-btn" onclick="setAlgo('jellium')" id="abJEL">⚛幻数</button>
-    <button class="algo-btn" onclick="setAlgo('multiharm')" id="abMH">🎵多谐波</button>
-    <button class="algo-btn" onclick="setAlgo('wuyin')" id="abWY">🎵五音</button>
-    <button class="algo-btn" onclick="setAlgo('septet')" id="abSEPT">☀☽7族</button>
-    <button class="algo-btn active" onclick="setAlgo('ab')" id="abAB">🔄九维</button>
+  <div style="display:flex;gap:4px;margin-top:4px;align-items:center">
+    <span style="font-size:10px;color:#888">🔄 多维算法轮转</span>
+    <button id="toggleOrig" onclick="toggleOriginal()" style="font-size:10px;padding:2px 6px;border-radius:4px;border:0;background:#333;color:#0f8;cursor:pointer">含原版 ✅</button>
   </div>
   <div style="font-size:10px;color:#0f8;margin:6px 0 2px">
     🔗原版指纹: <select id="personSelect" onchange="switchPerson(this.value)" style="background:#1a1a2e;color:#0f8;border:1px solid #0f8;border-radius:3px;padding:2px 6px;font-size:12px">
@@ -1424,6 +1445,14 @@ canvas{display:block;margin:0 auto;border-radius:8px}
       <span style="font-size:9px;color:#ff88cc;width:30px;text-align:right;flex-shrink:0">🎵</span>
       <div style="flex:1;height:7px;border-radius:3px;background:#222"><div id="barMH" style="background:#ff88cc;width:0%;height:100%;border-radius:3px;transition:width .4s,opacity .3s"></div></div>
     </div>
+    <div style="display:flex;align-items:center;gap:4px">
+      <span style="font-size:9px;color:#5dade2;width:30px;text-align:right;flex-shrink:0">五音</span>
+      <div style="flex:1;height:7px;border-radius:3px;background:#222"><div id="barWY" style="background:#5dade2;width:0%;height:100%;border-radius:3px;transition:width .4s,opacity .3s"></div></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:4px">
+      <span style="font-size:9px;color:#af7ac5;width:30px;text-align:right;flex-shrink:0">七族</span>
+      <div style="flex:1;height:7px;border-radius:3px;background:#222"><div id="barSEP" style="background:#af7ac5;width:0%;height:100%;border-radius:3px;transition:width .4s,opacity .3s"></div></div>
+    </div>
   </div>
 </div>
 <style>.algo-btn{padding:4px 7px;border-radius:8px;font-size:10px;cursor:pointer;background:#222;color:#888;border:0}.algo-btn.active{background:#7c4dff;color:#fff}.cmp-btn{background:#ff6600;color:#000;font-weight:bold}</style>
@@ -1445,7 +1474,7 @@ canvas{display:block;margin:0 auto;border-radius:8px}
   <canvas id="cvRadar" width="584" height="260"></canvas>
 </div>
 <div class="card view" id="view_compare">
-  <b style="color:#888;font-size:11px">⚖ 九维算法对比 (改善率)</b>
+  <b style="color:#888;font-size:11px">⚖ 多维算法对比 (改善率)</b>
   <canvas id="cvCompare" width="584" height="280"></canvas>
 </div>
 <div class="card view" id="view_ridge">
@@ -1545,7 +1574,7 @@ function drawCompare(items){
   var ab=document.getElementById('abStats');
   if(!items||items.length<3){
     ctx.fillStyle='#555';ctx.font='13px system-ui';ctx.textAlign='center';
-    ctx.fillText('等待统计…(需完成至少一轮九维扫描)',w/2,h/2);
+    ctx.fillText('等待统计…(需完成至少一轮多维扫描)',w/2,h/2);
     return;
   }
   var algoColors=['#ffcc44','#ff6644','#ffaa00','#44ff44','#4488ff','#44ccff','#ff6688','#ff88cc'];
@@ -1576,10 +1605,17 @@ function switchTab(name){
   event.target.classList.add('active');
   document.getElementById('view_'+name).classList.add('active');
   if(name==='radar'||(lastData.length>0&&name==='list')) drawRadar(lastData);
-  if(name==='ridge') fetch('/api/status').then(function(r){return r.json()}).then(function(s){
-    var items=Object.values(s.deltas||{});
-    drawRidge(items);
-  });
+  if(name==='ridge'){
+    // 优先用缓存数据(避免fetch竞态), lastData由poll持续更新
+    var ridgeItems = ridgeCache.length>=5 ? ridgeCache : lastData;
+    drawRidge(ridgeItems);
+    // 如果缓存为空, 尝试拉一次最新状态
+    if(ridgeItems.length===0) fetch('/api/status').then(function(r){return r.json()}).then(function(s){
+      var items=Object.values(s.deltas||{});
+      if(items.length>=5) ridgeCache=items;
+      drawRidge(items);
+    });
+  }
   if(name==='compare'){
     // Use the AB stats from poll
     var ab=document.getElementById('abStats');
@@ -1652,13 +1688,6 @@ var lastData=[],ridgeCache=[];
 function api(path){fetch(path).then(function(){poll()}).catch(function(e){debug('API错误:'+e)})}
 var calDone=false, calRunning=false, baselineEverDone=false;
 
-function setScanAmp(v){
-  document.getElementById('scanAmpVal').textContent=v;
-  fetch('/set_scan_amp/'+v).then(function(r){return r.json()}).then(function(d){
-    if(d.ok){document.getElementById('baselineDot').style.background='#f44'}
-  });
-}
-
 function setSpeed(v){
   document.getElementById('speedVal').textContent='×'+v;
   fetch('/set_speed/'+v);
@@ -1729,7 +1758,9 @@ function verifyPhase(){
 }
 
 function diagCh(){
-  api('/diag_channels');
+  fetch('/diag_channels').then(function(r){return r.json()}).then(function(d){
+    if(!d.ok) document.getElementById('dbg').textContent = d.msg || '诊断失败';
+  });
 }
 function testB13(){
   api('/test_b13');
@@ -1738,14 +1769,24 @@ function calibrate2D(){
   api('/calibrate_2d');
 }
 
+var excludeOriginal=false;
+function toggleOriginal(){
+  excludeOriginal=!excludeOriginal;
+  var btn=document.getElementById('toggleOrig');
+  btn.textContent=excludeOriginal?'不含原版 ❌':'含原版 ✅';
+  btn.style.color=excludeOriginal?'#f44':'#0f8';
+  // 隐藏/显示原版bar
+  var barOrg=document.getElementById('barOrg');
+  if(barOrg&&barOrg.parentNode&&barOrg.parentNode.parentNode)
+    barOrg.parentNode.parentNode.style.display=excludeOriginal?'none':'';
+  fetch('/exclude_original/'+(excludeOriginal?'1':'0'));
+}
 function setAlgo(mode){
-  document.querySelectorAll('.algo-btn').forEach(function(b){b.classList.remove('active')});
-  document.getElementById(mode==='yinyang'?'abYY':mode==='legacy'?'abOLD':mode==='fusion'?'abFUS':mode==='original'?'abORG':mode==='schumann'?'abSCH':mode==='water'?'abH2O':mode==='jellium'?'abJEL':mode==='multiharm'?'abMH':'abAB').classList.add('active');
-  // 只停止+清空+切模式，不自动启动
+  // 只有多维轮转模式
   fetch('/stop').then(function(){
     return fetch('/clear_log');
   }).then(function(){
-    return fetch('/algo?mode='+mode);
+    return fetch('/algo?mode=ab');
   }).then(poll);
 }
 function switchPerson(name){
@@ -1766,7 +1807,6 @@ function loadPersons(){
   });
 }
 loadPersons();
-}
 
 function clearLogs(){
   if(!confirm('清空全部日志并重新开始？'))return;
@@ -1845,10 +1885,12 @@ function poll(){
     if(s.playing||s.scanning){btnS.style.display='none';btnX.style.display='inline-block';btnC.style.display='inline-block'}
     else{btnS.style.display='inline-block';btnX.style.display='none';btnC.style.display='none'}
 
-    // Calibration overlay: only auto-show on FIRST load (never had baseline)
+    // Calibration overlay: only show if NO saved baseline AND connected
     var ov=document.getElementById('calOverlay');
-    if(s.has_baseline) baselineEverDone = true;
-    if(!s.has_baseline && !baselineEverDone && s.connected){
+    if(s.has_baseline){
+      baselineEverDone = true;
+      if(!ov.classList.contains('hidden')) ov.classList.add('hidden');
+    } else if(!baselineEverDone && s.connected){
       ov.classList.remove('hidden');
     }
 
@@ -1859,41 +1901,6 @@ function poll(){
     bDot.title='基线'+ageText;
     // 2D baseline
     document.getElementById('baseline2dDot').style.background=s.has_2d_baseline?'#00ff88':'#888';
-    // Sync scan amp slider (only if not currently dragging)
-    if(s.scan_amp && document.getElementById('scanAmpVal')){
-      var sl=document.getElementById('scanAmpSlider');
-      if(document.activeElement!==sl){
-        sl.value=s.scan_amp;
-        document.getElementById('scanAmpVal').textContent=s.scan_amp;
-      }
-    }
-    // Sync timing sliders
-    if(s.min_interval!=null && document.getElementById('minIntervalVal')){
-      var mi=Math.round(s.min_interval*100);
-      var misl=document.getElementById('minIntervalSlider');
-      if(document.activeElement!==misl){
-        misl.value=mi; document.getElementById('minIntervalVal').textContent=s.min_interval.toFixed(2)+'s';
-      }
-    }
-    if(s.pause_threshold!=null && document.getElementById('pauseThreshVal')){
-      var pt=Math.round(s.pause_threshold*10);
-      var ptsl=document.getElementById('pauseThreshSlider');
-      if(document.activeElement!==ptsl){
-        ptsl.value=pt; document.getElementById('pauseThreshVal').textContent=s.pause_threshold.toFixed(1)+'s';
-      }
-    }
-    if(s.max_burst!=null && document.getElementById('maxBurstVal')){
-      var mbsl=document.getElementById('maxBurstSlider');
-      if(document.activeElement!==mbsl){
-        mbsl.value=s.max_burst; document.getElementById('maxBurstVal').textContent=s.max_burst;
-      }
-    }
-    if(s.power_boost!=null && document.getElementById('powerBoostVal')){
-      var pbsl=document.getElementById('powerBoostSlider');
-      if(document.activeElement!==pbsl){
-        pbsl.value=s.power_boost; document.getElementById('powerBoostVal').textContent='+'+s.power_boost;
-      }
-    }
 
     var st=document.getElementById('stats');
     if(s.playing){
@@ -1906,12 +1913,13 @@ function poll(){
     else if((s.log||[])[0]&&s.log[0].indexOf('📐 校准')>=0){st.innerHTML='<span style="color:#ffaa00">📐 校准中...</span>'}
     else{st.innerHTML='○ 待机'}
 
-    // 九维对比统计 + 颜色条
-    var ab=document.getElementById('abStats'),org=s.ab_original||{},leg=s.ab_legacy||{},yy=s.ab_yinyang||{},fus=s.ab_fusion||{},sch=s.ab_schumann||{},h2o=s.ab_water||{},jel=s.ab_jellium||{},mh=s.ab_multiharm||{};
+    // 多维对比统计 + 颜色条
+    var ab=document.getElementById('abStats'),org=s.ab_original||{},leg=s.ab_legacy||{},yy=s.ab_yinyang||{},fus=s.ab_fusion||{},sch=s.ab_schumann||{},h2o=s.ab_water||{},jel=s.ab_jellium||{},mh=s.ab_multiharm||{},wy=s.ab_wuyin||{},sep=s.ab_septet||{};
     // Store for compare tab
     window._abStats_original=org;window._abStats_legacy=leg;window._abStats_yinyang=yy;
     window._abStats_fusion=fus;window._abStats_schumann=sch;window._abStats_water=h2o;
     window._abStats_jellium=jel;window._abStats_multiharm=mh;
+    window._abStats_wuyin=wy;window._abStats_septet=sep;
     var orgRate=org.rounds>0?(org.imp/(org.imp+org.wors||1)*100).toFixed(0):'-';
     var legRate=leg.rounds>0?(leg.imp/(leg.imp+leg.wors||1)*100).toFixed(0):'-';
     var yyRate=yy.rounds>0?(yy.imp/(yy.imp+yy.wors||1)*100).toFixed(0):'-';
@@ -1920,8 +1928,10 @@ function poll(){
     var h2oRate=h2o.rounds>0?(h2o.imp/(h2o.imp+h2o.wors||1)*100).toFixed(0):'-';
     var jelRate=jel.rounds>0?(jel.imp/(jel.imp+jel.wors||1)*100).toFixed(0):'-';
     var mhRate=mh.rounds>0?(mh.imp/(mh.imp+mh.wors||1)*100).toFixed(0):'-';
+    var wyRate=wy.rounds>0?(wy.imp/(wy.imp+wy.wors||1)*100).toFixed(0):'-';
+    var sepRate=sep.rounds>0?(sep.imp/(sep.imp+sep.wors||1)*100).toFixed(0):'-';
     var isAB = s.algo==='ab';
-    var barIds=['barOrg','barLeg','barYY','barFus','barSch','barH2O','barJEL','barMH'];
+    var barIds=['barOrg','barLeg','barYY','barFus','barSch','barH2O','barJEL','barMH','barWY','barSEP'];
     var curAlgoKey=s.current_algo||'';
     if(isAB){
       var algs=[
@@ -1932,7 +1942,9 @@ function poll(){
         {key:'schumann',name:'锚',rate:schRate,stat:sch,bar:'barSch'},
         {key:'water',name:'水',rate:h2oRate,stat:h2o,bar:'barH2O'},
         {key:'jellium',name:'幻',rate:jelRate,stat:jel,bar:'barJEL'},
-        {key:'multiharm',name:'🎵',rate:mhRate,stat:mh,bar:'barMH'}
+        {key:'multiharm',name:'🎵',rate:mhRate,stat:mh,bar:'barMH'},
+        {key:'wuyin',name:'五音',rate:wyRate,stat:wy,bar:'barWY'},
+        {key:'septet',name:'七族',rate:sepRate,stat:sep,bar:'barSEP'}
       ];
       // 改善率排序
       algs.sort(function(a,b){return (b.rate=='-'?0:parseInt(b.rate))-(a.rate=='-'?0:parseInt(a.rate))});
@@ -1942,11 +1954,17 @@ function poll(){
         return '<span'+hl+'>'+a.name+'</span> <span style=\"color:#0f8;font-size:9px\">+'+imp+'</span><span style=\"color:#f44;font-size:9px\">-'+wors+'</span><b>'+a.rate+'%</b>';
       });
       ab.innerHTML='🏆 '+abLines.join('  ');
+      document.getElementById('abBars').style.display='block';  // 显示容器
       barIds.forEach(function(id){var el=document.getElementById(id);if(el&&el.parentNode&&el.parentNode.parentNode){el.parentNode.parentNode.style.display=''}});
+      // 如果排除了原版，隐藏原版bar
+      if(excludeOriginal){
+        var bo=document.getElementById('barOrg');
+        if(bo&&bo.parentNode&&bo.parentNode.parentNode) bo.parentNode.parentNode.style.display='none';
+      }
       // 突显当前算法bar
       barIds.forEach(function(id){var el=document.getElementById(id);if(el)el.style.opacity='1'});
       if(curAlgoKey){
-        var curBarId={original:'barOrg',legacy:'barLeg',yinyang:'barYY',fusion:'barFus',schumann:'barSch',water:'barH2O',jellium:'barJEL',multiharm:'barMH'}[curAlgoKey];
+        var curBarId={original:'barOrg',legacy:'barLeg',yinyang:'barYY',fusion:'barFus',schumann:'barSch',water:'barH2O',jellium:'barJEL',multiharm:'barMH',wuyin:'barWY',septet:'barSEP'}[curAlgoKey];
         if(curBarId){var cel=document.getElementById(curBarId);if(cel)cel.style.opacity='1'}
       }
       document.getElementById('barOrg').style.width=(orgRate=='-'?0:Math.max(1,orgRate))+'%';
@@ -1957,6 +1975,8 @@ function poll(){
       document.getElementById('barH2O').style.width=(h2oRate=='-'?0:Math.max(1,h2oRate))+'%';
       document.getElementById('barJEL').style.width=(jelRate=='-'?0:Math.max(1,jelRate))+'%';
       document.getElementById('barMH').style.width=(mhRate=='-'?0:Math.max(1,mhRate))+'%';
+      document.getElementById('barWY').style.width=(wyRate=='-'?0:Math.max(1,wyRate))+'%';
+      document.getElementById('barSEP').style.width=(sepRate=='-'?0:Math.max(1,sepRate))+'%';
     } else {
       barIds.forEach(function(id){var el=document.getElementById(id);if(el&&el.parentNode&&el.parentNode.parentNode){el.parentNode.parentNode.style.display='none'}});
       var cur=s.algo||'yinyang';
@@ -2029,7 +2049,7 @@ class WebHandler(BaseHTTPRequestHandler):
 
     def send_json(self, data):
         self.send_response(200)
-        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
@@ -2113,6 +2133,8 @@ class WebHandler(BaseHTTPRequestHandler):
                 self.balancer.status["ab_water"] = {"imp": 0, "wors": 0, "rounds": 0}
                 self.balancer.status["ab_jellium"] = {"imp": 0, "wors": 0, "rounds": 0}
                 self.balancer.status["ab_multiharm"] = {"imp": 0, "wors": 0, "rounds": 0}
+                self.balancer.status["ab_wuyin"] = {"imp": 0, "wors": 0, "rounds": 0}
+                self.balancer.status["ab_septet"] = {"imp": 0, "wors": 0, "rounds": 0}
                 self.balancer.status["coupling"] = 50
             self.send_json({"ok": True})
         elif p.path == "/verify_phase":
@@ -2129,20 +2151,6 @@ class WebHandler(BaseHTTPRequestHandler):
                 return
             self.send_json({"ok": True, "msg": "调谐中…"})
             threading.Thread(target=lambda: self.balancer.auto_tune_amp(), daemon=True).start()
-        elif p.path.startswith("/set_scan_amp/"):
-            try:
-                amp = int(p.path.split("/")[-1])
-                amp = max(3, min(80, amp))  # clamp 3-80
-                self.balancer.scan_amp = amp
-                self.balancer.status["scan_amp"] = amp
-                self.balancer.per_b9_amp = {}  # 手动调滑块→清除per-b9映射
-                # 改振幅必须重新校准(基线需匹配)
-                self.balancer.status["has_baseline"] = False
-                self.balancer.baseline = {}
-                self.balancer.add_log(f"⚙ 振幅已设为 {amp}（需重新校准基线）")
-                self.send_json({"ok": True, "scan_amp": amp})
-            except:
-                self.send_json({"ok": False, "msg": "无效振幅值"})
         elif p.path.startswith("/set_speed/"):
             try:
                 spd = max(1, min(12, float(p.path.split("/")[-1])))
@@ -2187,8 +2195,18 @@ class WebHandler(BaseHTTPRequestHandler):
                 self.send_json({"ok": True, "power_boost": v})
             except:
                 self.send_json({"ok": False, "msg": "无效功率偏移"})
+        elif p.path.startswith("/exclude_original/"):
+            try:
+                v = p.path.split("/")[-1]
+                self.balancer.exclude_original = (v == "1")
+                label = "不含原版" if self.balancer.exclude_original else "含原版"
+                self.balancer.add_log(f"📊 多维轮转: {label}")
+                self.send_json({"ok": True, "exclude_original": self.balancer.exclude_original})
+            except:
+                self.send_json({"ok": False})
         elif p.path == "/diag_channels":
             if not self.balancer.ser or not self.balancer.ser.is_open:
+                self.balancer.add_log("⚠ 信道诊断: 手环未连接")
                 self.send_json({"ok": False, "msg": "手环未连接"})
                 return
             self.send_json({"ok": True, "msg": "诊断中…"})

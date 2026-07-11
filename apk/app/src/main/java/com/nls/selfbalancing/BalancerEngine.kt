@@ -292,7 +292,7 @@ class BalancerEngine(private val ctx: Context) {
                     for (band in abnormal) {
                         if (!isPlaying) break
                         val delta = deltas[band.b9]!!
-                        val corr = wuxingCorr(band.wuxing)
+                        val corr = 1.0  // PCAP振幅已编码器官差异, 不再用人工五行系数
                         val adjust = (abs(delta) * 0.5 * corr).toInt().coerceAtMost(60)
                         when (useAlgo) {
                             "original" -> treatOriginal(band.b9, delta, adjust)
